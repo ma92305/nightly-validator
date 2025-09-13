@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import unicodedata
 from collections import defaultdict
 import dropbox
+from dropbox.files import WriteMode
 
 # -----------------------------
 # Config
@@ -56,7 +57,7 @@ def dropbox_write_json(filename, data):
     dbx.files_upload(
         json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"),
         path,
-        mode=dropbox.files.WriteMode.OVERWRITE
+        mode=WriteMode.overwrite
     )
 
 def load_log(date):
