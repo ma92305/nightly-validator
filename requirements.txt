@@ -1,0 +1,10 @@
+streamlit
+numpy
+matplotlib
+pandas
+seaborn
+statsmodels
+pyarrow
+scipy
+joblib
+dropbox
