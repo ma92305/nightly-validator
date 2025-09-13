@@ -10,6 +10,11 @@ import dropbox
 # -----------------------------
 # Config
 # -----------------------------
+st.set_page_config(
+    page_title="Nightly Validator",
+    page_icon="favicon.png",  # can also use an emoji like "🩺"
+)
+
 dbx = dropbox.Dropbox(
     oauth2_refresh_token=st.secrets["dropbox_refresh_token"],
     app_key=st.secrets["dropbox_app_key"],
