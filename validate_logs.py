@@ -383,21 +383,31 @@ with st.expander("Symptoms", expanded=False):
             if f"temp_sev_{symptom}" not in st.session_state:
                 st.session_state[f"temp_sev_{symptom}"] = "⚪️"
 
-            hour_labels = [datetime.strptime(str(h), "%H").strftime("%-I %p") for h in range(24)]
+            # Hour labels for 24h + midnight next day
+            hour_labels = [datetime.strptime(str(h % 24), "%H").strftime("%-I %p") for h in range(25)]
+
+            # Start time select
             start_label = col1.selectbox(
                 "Start Hour",
                 hour_labels,
                 index=st.session_state[f"temp_start_{symptom}"],
                 key=f"input_start_{symptom}"
             )
+
+            # End time select (allow midnight of next day)
             end_label = col2.selectbox(
                 "End Hour",
                 hour_labels,
                 index=st.session_state[f"temp_end_{symptom}"],
                 key=f"input_end_{symptom}"
             )
+
+            # Convert labels → hours
             start_hour = datetime.strptime(start_label, "%I %p").hour
             end_hour = datetime.strptime(end_label, "%I %p").hour
+            if end_label == "12 AM" and end_hour == 0 and hour_labels.index(end_label) == 24:
+                # special case: midnight next day → treat as 24
+                end_hour = 24
 
             severity = col3.selectbox(
                 "Severity", SEVERITIES,
