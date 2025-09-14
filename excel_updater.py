@@ -245,10 +245,19 @@ def update_combined_excel(dbx, dropbox_folder_path: str):
                 df_meds["File"] = entry.name
                 all_meds.append(df_meds.sort_values("time", ascending=False))
 
-    # --- Combine DataFrames ---
+    # --- Safer concat_or_empty ---
     def concat_or_empty(lst):
-        return pd.concat(lst, ignore_index=True).sort_values("time", ascending=False, na_position="last") if lst else pd.DataFrame()
+        if not lst:
+            return pd.DataFrame()
+        df = pd.concat(lst, ignore_index=True)
+        if "time" in df.columns:
+            return df.sort_values("time", ascending=False, na_position="last")
+        elif "date" in df.columns:
+            return df.sort_values("date", ascending=False, na_position="last")
+        else:
+            return df
 
+    # --- Combine DataFrames ---
     hr_stats_df = pd.DataFrame(all_hr_stats).sort_values("date", ascending=False, na_position="last")
     tachy_df_all = concat_or_empty(all_tachy_events)
     sleep_stats_df = pd.DataFrame(all_sleep_stats).sort_values("date", ascending=False, na_position="last")
@@ -265,8 +274,8 @@ def update_combined_excel(dbx, dropbox_folder_path: str):
     nutrition_liquids_df = concat_or_empty(all_nutrition_liquids)
     digestion_df_all = concat_or_empty(all_digestion)
     meds_df_all = concat_or_empty(all_meds)
-    daily_liquids_df = pd.concat(all_daily_liquids, ignore_index=True).sort_values("date", ascending=False, na_position="last") if all_daily_liquids else pd.DataFrame()
-    daily_meals_df = pd.concat(all_daily_meals, ignore_index=True).sort_values("date", ascending=False, na_position="last") if all_daily_meals else pd.DataFrame()
+    daily_liquids_df = concat_or_empty(all_daily_liquids)
+    daily_meals_df = concat_or_empty(all_daily_meals)
     validated_keys_df = pd.DataFrame(all_validated_flags).fillna(False)
 
     # --- Export to Dropbox Excel ---
