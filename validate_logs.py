@@ -312,7 +312,6 @@ with col3:
 # ---- Date input ----
 selected_date = st.date_input(
     "Pick a date",
-    value=st.session_state.selected_date,
     key="selected_date"
 )
 
