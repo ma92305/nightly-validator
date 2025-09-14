@@ -466,7 +466,7 @@ with st.expander("Symptoms", expanded=False):
         st.markdown("_No events recorded for this day_")
 
     # -----------------------------
-    # Editable Event Section
+    # Editable Event Section (12-hour + 15 min increments)
     # -----------------------------
     with st.expander("Edit Events", expanded=False):
         data = st.session_state.data
@@ -497,18 +497,34 @@ with st.expander("Symptoms", expanded=False):
         st.markdown("#### Add New Event")
         all_events = st.session_state.all_lists.get("events", [])
         new_event_item = st.selectbox("Select Event", all_events, key="new_event_item")
-        new_event_time = st.time_input("Time of Event", key="new_event_time")
-        
+
+        # --- 12-hour time inputs with 15-min increments
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col1:
+            hour = st.selectbox("Hour", list(range(1, 13)), key="new_event_hour")
+        with col2:
+            minute = st.selectbox("Minute", [0, 15, 30, 45], key="new_event_minute")
+        with col3:
+            ampm = st.selectbox("AM/PM", ["AM", "PM"], key="new_event_ampm")
+
+        # --- Compute datetime
+        if ampm == "PM" and hour != 12:
+            hour_24 = hour + 12
+        elif ampm == "AM" and hour == 12:
+            hour_24 = 0
+        else:
+            hour_24 = hour
+        new_event_dt = datetime.combine(selected_date, datetime.min.time()) + timedelta(hours=hour_24, minutes=minute)
+
         if st.button("Add Event"):
-            dt = datetime.combine(selected_date, new_event_time)
             new_entry = {
                 "item": new_event_item,
-                "time": dt.strftime("%b %-d, %Y at %-I:%M %p"),
+                "time": new_event_dt.strftime("%b %-d, %Y at %-I:%M %p"),
                 "category": "Event"
             }
             data["symptom_entries"].append(new_entry)
             st.session_state.data = data
-            st.success(f"Added event: {new_event_item} at {dt.strftime('%-I:%M %p')}")
+            st.success(f"Added event: {new_event_item} at {new_event_dt.strftime('%-I:%M %p')}")
             st.experimental_rerun()
     
     # Symptom-only Validate
