@@ -385,68 +385,61 @@ with st.expander("Symptoms", expanded=False):
             if f"temp_sev_{symptom}" not in st.session_state:
                 st.session_state[f"temp_sev_{symptom}"] = "⚪️"
 
-            # Hour labels for 24h + midnight next day
-            hour_labels = [datetime.strptime(str(h % 24), "%H").strftime("%-I %p") for h in range(25)]
+            # --- Hour labels: 12 AM → 11 PM + midnight next day
+            hour_labels = [datetime.strptime(str(h % 24), "%H").strftime("%-I %p") for h in range(24)]
+            hour_labels.append("12 AM (next day)")  # last option for next-day midnight
 
-            # Start time select
+            # --- Start time select
             start_label = col1.selectbox(
                 "Start Hour",
                 hour_labels,
-                index=st.session_state[f"temp_start_{symptom}"],
+                index=st.session_state.get(f"temp_start_{symptom}", 8),
                 key=f"input_start_{symptom}"
             )
 
-            # End time select (allow midnight of next day)
+            # --- End time select
             end_label = col2.selectbox(
                 "End Hour",
                 hour_labels,
-                index=st.session_state[f"temp_end_{symptom}"],
+                index=st.session_state.get(f"temp_end_{symptom}", 9),
                 key=f"input_end_{symptom}"
             )
 
-            # Convert labels → hours
+            # --- Map labels → hours
             start_hour = datetime.strptime(start_label, "%I %p").hour
-            end_hour = datetime.strptime(end_label, "%I %p").hour
-
-            # Handle 12AM next day
-            if end_label == "12 AM" and hour_labels.index(end_label) == len(hour_labels) - 1:
+            if end_label == "12 AM (next day)":
                 end_hour = 24
+            else:
+                end_hour = datetime.strptime(end_label, "%I %p").hour
 
-            # Construct datetimes
+            # --- Construct datetimes
             start_dt = datetime.combine(selected_date, datetime.min.time()) + timedelta(hours=start_hour)
             if end_hour == 24:
                 end_dt = datetime.combine(selected_date + timedelta(days=1), datetime.min.time())
             else:
                 end_dt = datetime.combine(selected_date, datetime.min.time()) + timedelta(hours=end_hour)
 
+            # --- Severity select
             severity = col3.selectbox(
-                "Severity", SEVERITIES,
-                index=SEVERITIES.index(st.session_state[f"temp_sev_{symptom}"]),
+                "Severity",
+                SEVERITIES,
+                index=SEVERITIES.index(st.session_state.get(f"temp_sev_{symptom}", "⚪️")),
                 key=f"input_sev_{symptom}"
             )
 
-            st.session_state[f"temp_start_{symptom}"] = start_hour
-            st.session_state[f"temp_end_{symptom}"] = end_hour
+            # --- Save temporary values
+            st.session_state[f"temp_start_{symptom}"] = hour_labels.index(start_label)
+            st.session_state[f"temp_end_{symptom}"] = hour_labels.index(end_label)
             st.session_state[f"temp_sev_{symptom}"] = severity
 
+            # --- Save Change button
             if st.button(f"Save Change - {symptom}", key=f"save_change_{symptom}"):
-                # Construct full datetimes for start and end
-                start_dt = datetime.combine(selected_date, datetime.min.time()) + timedelta(hours=start_hour)
-    
-                # Handle 12AM next day properly
-                if end_hour == 24:  # you should have set this when selecting 12AM next day
-                    end_dt = datetime.combine(selected_date + timedelta(days=1), datetime.min.time())
-                else:
-                    end_dt = datetime.combine(selected_date, datetime.min.time()) + timedelta(hours=end_hour)
-
-                # Convert to timeline minutes for the current day
+                # Compute timeline minutes
                 start_min = int((start_dt - datetime.combine(selected_date, datetime.min.time())).total_seconds() // 60)
                 end_min = int((end_dt - datetime.combine(selected_date, datetime.min.time())).total_seconds() // 60)
+                end_min_timeline = min(end_min, MINUTES_IN_DAY)  # clip to 1440
 
-                # Trim end_min to max of 24*60 so timeline array doesn't overflow
-                end_min_timeline = min(end_min, MINUTES_IN_DAY)
-
-                # Apply severity to timeline
+                # Apply severity
                 st.session_state.timelines[symptom][start_min:end_min_timeline] = [severity] * (end_min_timeline - start_min)
 
                 st.success("Timeline updated in place.")
