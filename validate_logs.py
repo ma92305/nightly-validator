@@ -40,7 +40,11 @@ MINUTES_IN_DAY = 24 * 60
 # -----------------------------
 # Refresh Button + Cached Loader
 # -----------------------------
-st.sidebar.button("🔄 Refresh Data", on_click=lambda: st.session_state.pop("cached_logs", None))
+st.sidebar.button(
+    "🔄 Refresh Data",
+    on_click=lambda: st.session_state.pop("cached_logs", None),
+    key="refresh_data_button"  # unique key avoids duplicates
+)
 
 def get_log(date):
     """Load log for a date, but only fetch from Dropbox if not cached or if refreshed."""
