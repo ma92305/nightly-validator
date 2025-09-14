@@ -408,15 +408,16 @@ with st.expander("Symptoms", expanded=False):
             start_hour = datetime.strptime(start_label, "%I %p").hour
             end_hour = datetime.strptime(end_label, "%I %p").hour
 
-            # Determine if end hour is intended to be midnight of next day
+            # Handle 12AM next day
             if end_label == "12 AM" and hour_labels.index(end_label) == len(hour_labels) - 1:
-                # Treat as midnight next day
+                end_hour = 24
+
+            # Construct datetimes
+            start_dt = datetime.combine(selected_date, datetime.min.time()) + timedelta(hours=start_hour)
+            if end_hour == 24:
                 end_dt = datetime.combine(selected_date + timedelta(days=1), datetime.min.time())
             else:
                 end_dt = datetime.combine(selected_date, datetime.min.time()) + timedelta(hours=end_hour)
-
-            # Start datetime
-            start_dt = datetime.combine(selected_date, datetime.min.time()) + timedelta(hours=start_hour)
 
             severity = col3.selectbox(
                 "Severity", SEVERITIES,
