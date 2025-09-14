@@ -2,13 +2,9 @@ import json
 import pandas as pd
 import warnings
 from io import BytesIO
-import dropbox
 
-# --- CONFIG ---
-DROPBOX_ACCESS_TOKEN = "YOUR_DROPBOX_ACCESS_TOKEN"
 EXCEL_FILENAME = "combined_data.xlsx"
 
-# Quantity mapping for nutrition amount keywords
 quantity_map = {
     "a little": 1,
     "some": 2,
@@ -16,7 +12,6 @@ quantity_map = {
     "a lot": 4
 }
 
-# --- UTILITY FUNCTIONS ---
 def map_amount_to_number(amount_str):
     if not isinstance(amount_str, str):
         return 0
@@ -71,10 +66,11 @@ def extract_weather_stats(weather_entries):
         "precipitation_total": precipitation.get("precipitation_total"),
     }
 
-# --- MAIN FUNCTION ---
-def update_combined_excel(dropbox_folder_path: str):
-    dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
-
+def update_combined_excel(dbx, dropbox_folder_path: str):
+    """
+    Generates a combined Excel file from all validated health logs in Dropbox
+    and uploads it back to the same folder. Requires a dropbox.Dropbox client.
+    """
     # --- Containers ---
     all_hr_stats, all_tachy_events, all_sleep_stats, all_weather_stats, all_hourly_weather = [], [], [], [], []
     all_symptoms, all_symptom_events, all_conditions, all_loc_activities, all_stairs, all_standing, all_walking = [], [], [], [], [], [], []
@@ -82,7 +78,6 @@ def update_combined_excel(dropbox_folder_path: str):
     all_daily_liquids, all_daily_meals = [], []
     all_validated_flags = []
 
-    # --- List files in Dropbox folder ---
     try:
         res = dbx.files_list_folder(dropbox_folder_path)
     except Exception as e:
@@ -101,16 +96,8 @@ def update_combined_excel(dropbox_folder_path: str):
             continue
 
         validated = data.get("validated_entries", {})
-        if isinstance(validated, list) and validated and isinstance(validated[0], dict):
-            val_dict = validated[0]
-        elif isinstance(validated, dict):
-            val_dict = validated
-        else:
-            val_dict = {}
-
-        for k in val_dict.keys():
-            if isinstance(val_dict[k], str):
-                val_dict[k] = val_dict[k].lower() == "true"
+        val_dict = validated[0] if isinstance(validated, list) and validated else validated
+        val_dict = {k: str(v).lower() == "true" for k, v in val_dict.items()} if isinstance(val_dict, dict) else {}
 
         # --- Store validated flags ---
         row_flags = {"File": entry.name}
@@ -167,14 +154,7 @@ def update_combined_excel(dropbox_folder_path: str):
             all_weather_stats.append(stats)
 
         # --- SYMPTOMS ---
-        is_valid = False
-        validated_entries = data.get("validated_entries", [])
-        if isinstance(validated_entries, list):
-            for e in validated_entries:
-                if e.get("symptoms_valid"):
-                    is_valid = True
-                    break
-        if is_valid:
+        if val_dict.get("symptoms_valid", False):
             symptoms = clean_entries(data.get("symptom_entries", []), required_fields=["item", "time"])
             if symptoms:
                 df_symp = pd.DataFrame(symptoms)
@@ -196,7 +176,7 @@ def update_combined_excel(dropbox_folder_path: str):
 
         # --- CONDITIONS & ACTIVITIES ---
         if val_dict.get("conditions_valid", False):
-            cond_entries = clean_entries(data.get("condition_entries", []), required_fields=["item", "time"])
+            cond_entries = clean_entries(data.get("condition_entries", []), required_fields=["item","time"])
             if cond_entries:
                 df_cond = pd.DataFrame(cond_entries)
                 df_cond["time"] = pd.to_datetime(df_cond["time"], errors='coerce')
@@ -261,15 +241,14 @@ def update_combined_excel(dropbox_folder_path: str):
                 df_meds["File"] = entry.name
                 all_meds.append(df_meds.sort_values("time", ascending=False))
 
-    # --- COMBINE DATAFRAMES ---
+    # --- Combine DataFrames ---
     def concat_or_empty(lst):
         return pd.concat(lst, ignore_index=True).sort_values("time", ascending=False, na_position="last") if lst else pd.DataFrame()
 
     hr_stats_df = pd.DataFrame(all_hr_stats).sort_values("date", ascending=False, na_position="last")
+    tachy_df_all = concat_or_empty(all_tachy_events)
     sleep_stats_df = pd.DataFrame(all_sleep_stats).sort_values("date", ascending=False, na_position="last")
     weather_stats_df = pd.DataFrame(all_weather_stats)
-    tachy_df_all = concat_or_empty(all_tachy_events)
-    hourly_weather_df = concat_or_empty(all_hourly_weather)
     symptoms_df_all = concat_or_empty(all_symptoms)
     symptom_events_df_all = concat_or_empty(all_symptom_events)
     conditions_df_all = concat_or_empty(all_conditions)
@@ -286,14 +265,13 @@ def update_combined_excel(dropbox_folder_path: str):
     daily_meals_df = pd.concat(all_daily_meals, ignore_index=True).sort_values("date", ascending=False, na_position="last") if all_daily_meals else pd.DataFrame()
     validated_keys_df = pd.DataFrame(all_validated_flags).fillna(False)
 
-    # --- EXPORT TO DROPBOX EXCEL ---
+    # --- Export to Dropbox Excel ---
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         hr_stats_df.to_excel(writer, sheet_name="HR Stats", index=False)
         tachy_df_all.to_excel(writer, sheet_name="Tachy Events", index=False)
         sleep_stats_df.to_excel(writer, sheet_name="Sleep Stats", index=False)
         weather_stats_df.to_excel(writer, sheet_name="Weather Stats", index=False)
-        hourly_weather_df.to_excel(writer, sheet_name="Hourly Weather", index=False)
         symptoms_df_all.to_excel(writer, sheet_name="Symptoms", index=False)
         if not symptom_events_df_all.empty:
             startrow_events = len(symptoms_df_all) + 3
