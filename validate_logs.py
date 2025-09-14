@@ -264,10 +264,6 @@ def plot_timeline_matplotlib(timeline, symptom, fig_height=1):
 # -----------------------------
 # Streamlit UI - Header / Date
 # -----------------------------
-from datetime import date, timedelta
-
-st.title("Daily Health Check-in")
-st.subheader("Good job getting through the day! Let's review it.")
 
 # Initialize selected_date in session_state
 if "selected_date" not in st.session_state:
@@ -277,7 +273,7 @@ if "selected_date" not in st.session_state:
         st.session_state.selected_date = date.today() - timedelta(days=1)
     else:
         st.session_state.selected_date = date.today()
-        
+
 # Navigation button handlers
 def go_prev_day():
     st.session_state.selected_date -= timedelta(days=1)
@@ -286,7 +282,11 @@ def go_next_day():
     st.session_state.selected_date += timedelta(days=1)
 
 def go_today():
-    st.session_state.selected_date = date.today()
+    now = datetime.now()
+    if 0 <= now.hour < 4:
+        st.session_state.selected_date = date.today() - timedelta(days=1)
+    else:
+        st.session_state.selected_date = date.today()
 
 # ---- Navigation row ----
 col1, col2, col3 = st.columns([1,1,1])
