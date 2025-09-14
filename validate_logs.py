@@ -407,9 +407,16 @@ with st.expander("Symptoms", expanded=False):
             # Convert labels → hours
             start_hour = datetime.strptime(start_label, "%I %p").hour
             end_hour = datetime.strptime(end_label, "%I %p").hour
-            if end_label == "12 AM" and end_hour == 0 and hour_labels.index(end_label) == 24:
-                # special case: midnight next day → treat as 24
-                end_hour = 24
+
+            # Determine if end hour is intended to be midnight of next day
+            if end_label == "12 AM" and hour_labels.index(end_label) == len(hour_labels) - 1:
+                # Treat as midnight next day
+                end_dt = datetime.combine(selected_date + timedelta(days=1), datetime.min.time())
+            else:
+                end_dt = datetime.combine(selected_date, datetime.min.time()) + timedelta(hours=end_hour)
+
+            # Start datetime
+            start_dt = datetime.combine(selected_date, datetime.min.time()) + timedelta(hours=start_hour)
 
             severity = col3.selectbox(
                 "Severity", SEVERITIES,
@@ -422,9 +429,25 @@ with st.expander("Symptoms", expanded=False):
             st.session_state[f"temp_sev_{symptom}"] = severity
 
             if st.button(f"Save Change - {symptom}", key=f"save_change_{symptom}"):
-                start_min = start_hour * 60
-                end_min = end_hour * 60
-                st.session_state.timelines[symptom][start_min:end_min] = [severity] * (end_min - start_min)
+                # Construct full datetimes for start and end
+                start_dt = datetime.combine(selected_date, datetime.min.time()) + timedelta(hours=start_hour)
+    
+                # Handle 12AM next day properly
+                if end_hour == 24:  # you should have set this when selecting 12AM next day
+                    end_dt = datetime.combine(selected_date + timedelta(days=1), datetime.min.time())
+                else:
+                    end_dt = datetime.combine(selected_date, datetime.min.time()) + timedelta(hours=end_hour)
+
+                # Convert to timeline minutes for the current day
+                start_min = int((start_dt - datetime.combine(selected_date, datetime.min.time())).total_seconds() // 60)
+                end_min = int((end_dt - datetime.combine(selected_date, datetime.min.time())).total_seconds() // 60)
+
+                # Trim end_min to max of 24*60 so timeline array doesn't overflow
+                end_min_timeline = min(end_min, MINUTES_IN_DAY)
+
+                # Apply severity to timeline
+                st.session_state.timelines[symptom][start_min:end_min_timeline] = [severity] * (end_min_timeline - start_min)
+
                 st.success("Timeline updated in place.")
                 st.session_state[f"expander_{symptom}"] = False
                 st.rerun()
