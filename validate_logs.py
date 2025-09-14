@@ -38,6 +38,24 @@ COLOR_MAP = {
 MINUTES_IN_DAY = 24 * 60
 
 # -----------------------------
+# Refresh Button + Cached Loader
+# -----------------------------
+st.sidebar.button("🔄 Refresh Data", on_click=lambda: st.session_state.pop("cached_logs", None))
+
+def get_log(date):
+    """Load log for a date, but only fetch from Dropbox if not cached or if refreshed."""
+    if "cached_logs" not in st.session_state:
+        st.session_state.cached_logs = {}
+
+    key = date.strftime("%Y-%m-%d")
+
+    if key not in st.session_state.cached_logs:
+        log = load_log(date) or {}
+        st.session_state.cached_logs[key] = log
+
+    return st.session_state.cached_logs[key]
+
+# -----------------------------
 # Dropbox Helpers (define first)
 # -----------------------------
 def dropbox_read_json(filename):
