@@ -3,6 +3,7 @@ import pandas as pd
 import warnings
 from io import BytesIO
 import dropbox
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 EXCEL_FILENAME = "combined_data.xlsx"
 
@@ -67,101 +68,104 @@ def extract_weather_stats(weather_entries):
         "precipitation_total": precipitation.get("precipitation_total"),
     }
 
-def update_combined_excel(dbx, dropbox_folder_path: str):
+def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5):
     """
-    Incremental version:
-    - Uses a cache file (combined_cache.json) in Dropbox.
-    - Only reloads new/changed daily logs based on server_modified timestamp.
-    - Rebuilds Excel from cached + updated data.
+    Full incremental Excel builder with:
+    - Parallel JSON loading
+    - DataFrame caching for speed
+    - All sheets included (HR, Sleep, Weather, Symptoms, Meds, Nutrition, Digestion, Conditions, Activities, Stairs, Standing, Walking, Validated Keys)
     """
 
     cache_file = f"{dropbox_folder_path}/combined_cache.json"
 
-    # --- Load existing cache if available ---
+    # --- Load existing cache ---
     try:
         md, res = dbx.files_download(cache_file)
         cache = json.loads(res.content.decode("utf-8"))
     except Exception:
-        cache = {"logs": {}}  # date_str -> {"data": {..}, "last_modified": "..."}
-    
+        cache = {"logs": {}}
+
     updated = False
 
-    # --- Get all log files in Dropbox ---
+    # --- List all health log files ---
     try:
         res = dbx.files_list_folder(dropbox_folder_path)
     except Exception as e:
         print("Dropbox folder error:", e)
         return
 
+    logs_to_process = []
     for entry in res.entries:
         if not entry.name.startswith("health_log_") or not entry.name.endswith(".txt"):
             continue
-
         date_str = entry.name.replace("health_log_", "").replace(".txt", "")
         last_mod = entry.server_modified.isoformat()
-
         cached = cache["logs"].get(date_str)
         if cached and cached.get("last_modified") == last_mod:
-            continue  # unchanged → skip
-
-        # Otherwise reload from Dropbox
-        try:
-            _, f = dbx.files_download(entry.path_lower)
-            data = json.loads(f.content.decode("utf-8"))
-        except Exception as e:
-            print(f"Failed to read {entry.name}:", e)
             continue
+        logs_to_process.append((entry.path_lower, entry.name, date_str, last_mod))
 
-        cache["logs"][date_str] = {
-            "data": data,
-            "last_modified": last_mod,
-            "filename": entry.name,
-        }
-        updated = True
-
-    if not updated and cache["logs"]:
+    if not logs_to_process and cache["logs"]:
         print("⚡ No new/changed logs. Skipping Excel rebuild.")
         return
 
-    # --- Save updated cache back to Dropbox ---
-    dbx.files_upload(
-        json.dumps(cache, ensure_ascii=False, indent=2).encode("utf-8"),
-        cache_file,
-        mode=dropbox.files.WriteMode.overwrite,
-    )
+    # --- Parallel download & parse ---
+    def fetch_log(entry_path, filename, date_str, last_mod):
+        try:
+            _, f = dbx.files_download(entry_path)
+            data = json.loads(f.content.decode("utf-8"))
+            return date_str, {"data": data, "last_modified": last_mod, "filename": filename}
+        except Exception as e:
+            print(f"Failed to read {filename}:", e)
+            return None
 
-    # --- Containers for combined DataFrames ---
-    all_hr_stats, all_tachy_events, all_sleep_stats, all_weather_stats = [], [], [], []
-    all_symptoms, all_symptom_events, all_conditions, all_loc_activities = [], [], [], []
-    all_stairs, all_standing, all_walking = [], [], []
-    all_nutrition_general, all_nutrition_meals, all_nutrition_liquids = [], [], []
-    all_digestion, all_meds = [], []
-    all_daily_liquids, all_daily_meals = [], []
-    all_validated_flags = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(fetch_log, *args) for args in logs_to_process]
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                date_str, log_data = result
+                cache["logs"][date_str] = log_data
+                updated = True
 
-    # --- Process each cached log ---
+    if updated:
+        dbx.files_upload(
+            json.dumps(cache, ensure_ascii=False, indent=2).encode("utf-8"),
+            cache_file,
+            mode=dropbox.files.WriteMode.overwrite,
+        )
+
+    # --- Containers for all sheets ---
+    sheets = {
+        "hr_stats": [], "tachy_events": [], "sleep": [], "weather": [],
+        "symptoms": [], "symptom_events": [], "conditions": [], "activities": [],
+        "stairs": [], "standing": [], "walking": [],
+        "nutrition_general": [], "nutrition_meals": [], "nutrition_liquids": [],
+        "digestion": [], "meds": [], "daily_liquids": [], "daily_meals": [],
+        "validated_flags": []
+    }
+
+    # --- Process cached logs ---
     for date_str, payload in cache["logs"].items():
         data = payload["data"]
         filename = payload["filename"]
-
         validated = data.get("validated_entries", {})
         val_dict = validated[0] if isinstance(validated, list) and validated else validated
         val_dict = {k: str(v).lower() == "true" for k, v in val_dict.items()} if isinstance(val_dict, dict) else {}
 
-        # --- Store validated flags ---
+        # Validated flags
         row_flags = {"File": filename}
-        for key, value in val_dict.items():
-            row_flags[key] = bool(value)
-        all_validated_flags.append(row_flags)
+        for k, v in val_dict.items():
+            row_flags[k] = bool(v)
+        sheets["validated_flags"].append(row_flags)
 
-        # --- Extract date ---
         file_date = pd.to_datetime(date_str, errors="coerce").date()
 
-        # --- HR ---
+        # --- HR & Tachy ---
         hr = data.get("heartrate_entries", {})
         if isinstance(hr, list):
             hr = hr[0] if hr else {}
-        all_hr_stats.append({
+        sheets["hr_stats"].append({
             "File": filename,
             "HR_max": hr.get("HR_max"),
             "HR_avg": hr.get("HR_avg"),
@@ -170,7 +174,6 @@ def update_combined_excel(dbx, dropbox_folder_path: str):
             "HRV": hr.get("HRV"),
             "date": file_date,
         })
-
         tachy_dict = parse_tachy_events(hr.get("tachy_events", {}))
         if any(len(v) > 0 for v in tachy_dict.values()):
             tachy_df = pd.DataFrame(tachy_dict)
@@ -179,12 +182,12 @@ def update_combined_excel(dbx, dropbox_folder_path: str):
                 tachy_df["event_start"] = pd.to_datetime(tachy_df.get("event_start"), errors='coerce')
                 tachy_df["event_end"] = pd.to_datetime(tachy_df.get("event_end"), errors='coerce')
             tachy_df["File"] = filename
-            all_tachy_events.append(tachy_df)
+            sheets["tachy_events"].append(tachy_df)
 
-        # --- SLEEP ---
+        # --- Sleep & Weather ---
         sleep = data.get("sleep_entries", {})
         sleep_date = pd.to_datetime(sleep.get("bedtime"), errors='coerce').date() if sleep.get("bedtime") else file_date
-        all_sleep_stats.append({
+        sheets["sleep"].append({
             "File": filename,
             "date": sleep_date,
             "duration": sleep.get("asleep_time"),
@@ -196,14 +199,12 @@ def update_combined_excel(dbx, dropbox_folder_path: str):
             "deep_time": sleep.get("deep_time"),
             "awake_time": sleep.get("awake_time"),
         })
-
-        # --- WEATHER ---
         weather = data.get("weather_entries", {})
         if weather:
             stats = extract_weather_stats(weather)
             stats["File"] = filename
             stats["date"] = sleep_date
-            all_weather_stats.append(stats)
+            sheets["weather"].append(stats)
 
         # --- SYMPTOMS ---
         if val_dict.get("symptoms_valid", False):
@@ -219,12 +220,12 @@ def update_combined_excel(dbx, dropbox_folder_path: str):
                     df_regular = df_regular.drop(columns=["category"], errors="ignore")
                     df_regular["time"] = pd.to_datetime(df_regular["time"], errors='coerce')
                     df_regular["File"] = filename
-                    all_symptoms.append(df_regular.sort_values("time", ascending=False))
+                    sheets["symptoms"].append(df_regular.sort_values("time", ascending=False))
                 if not df_events.empty:
                     df_events = df_events[["item", "time"]].copy()
                     df_events["time"] = pd.to_datetime(df_events["time"], errors='coerce')
                     df_events["File"] = filename
-                    all_symptom_events.append(df_events.sort_values("time", ascending=False))
+                    sheets["symptom_events"].append(df_events.sort_values("time", ascending=False))
 
         # --- CONDITIONS & ACTIVITIES ---
         if val_dict.get("conditions_valid", False):
@@ -240,13 +241,13 @@ def update_combined_excel(dbx, dropbox_folder_path: str):
                 df_conditions = df_cond[df_cond["category"] == "conditions"].copy()
                 if not df_activities.empty:
                     df_activities = df_activities.drop(columns=["category"], errors="ignore")
-                    all_loc_activities.append(df_activities.sort_values("time", ascending=False))
+                    sheets["activities"].append(df_activities.sort_values("time", ascending=False))
                 if not df_conditions.empty:
                     df_conditions = df_conditions.drop(columns=["category"], errors="ignore")
-                    all_conditions.append(df_conditions.sort_values("time", ascending=False))
-                all_stairs.append(df_cond[df_cond["item"].str.lower() == "stairs"].drop(columns=["status","category"], errors="ignore").sort_values("time", ascending=False))
-                all_standing.append(df_cond[df_cond["item"].str.lower() == "🧍prolonged standing"].drop(columns=["status","category"], errors="ignore").sort_values("time", ascending=False))
-                all_walking.append(df_cond[df_cond["item"].str.lower() == "walking"].drop(columns=["status","category"], errors="ignore").sort_values("time", ascending=False))
+                    sheets["conditions"].append(df_conditions.sort_values("time", ascending=False))
+                sheets["stairs"].append(df_cond[df_cond["item"].str.lower() == "stairs"].drop(columns=["status","category"], errors="ignore").sort_values("time", ascending=False))
+                sheets["standing"].append(df_cond[df_cond["item"].str.lower() == "🧍prolonged standing"].drop(columns=["status","category"], errors="ignore").sort_values("time", ascending=False))
+                sheets["walking"].append(df_cond[df_cond["item"].str.lower() == "walking"].drop(columns=["status","category"], errors="ignore").sort_values("time", ascending=False))
 
         # --- NUTRITION ---
         if val_dict.get("nutrition_valid", False):
@@ -258,21 +259,21 @@ def update_combined_excel(dbx, dropbox_folder_path: str):
                 meals_df = df_nutri[df_nutri["item"].astype(str).str.contains("🍽️")].sort_values("time", ascending=False)
                 liquids_df = df_nutri[df_nutri["item"].astype(str).str.contains("💧")].sort_values("time", ascending=False)
                 general_df = df_nutri[~df_nutri["item"].astype(str).str.contains("🍽️|💧")].sort_values("time", ascending=False)
-                all_nutrition_meals.append(meals_df)
-                all_nutrition_liquids.append(liquids_df)
-                all_nutrition_general.append(general_df)
+                sheets["nutrition_meals"].append(meals_df)
+                sheets["nutrition_liquids"].append(liquids_df)
+                sheets["nutrition_general"].append(general_df)
 
                 if not liquids_df.empty and "amount" in liquids_df.columns:
                     liquids_df["amount_num"] = liquids_df["amount"].apply(map_amount_to_number)
                     liquids_df["date"] = liquids_df["time"].dt.date
                     daily_liquids = liquids_df.groupby("date")["amount_num"].sum().reset_index().rename(columns={"amount_num":"daily_total_liquid"})
-                    all_daily_liquids.append(daily_liquids)
+                    sheets["daily_liquids"].append(daily_liquids)
 
                 if not meals_df.empty and "amount" in meals_df.columns:
                     meals_df["amount_num"] = meals_df["amount"].apply(map_amount_to_number)
                     meals_df["date"] = meals_df["time"].dt.date
                     daily_meals = meals_df.groupby("date")["amount_num"].sum().reset_index().rename(columns={"amount_num":"daily_total_meals"})
-                    all_daily_meals.append(daily_meals)
+                    sheets["daily_meals"].append(daily_meals)
 
         # --- DIGESTION ---
         if val_dict.get("digestion_valid", False):
@@ -281,7 +282,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str):
                 df_dig = pd.DataFrame(digestion).drop(columns=["category"], errors="ignore")
                 df_dig["time"] = pd.to_datetime(df_dig["time"], errors='coerce')
                 df_dig["File"] = filename
-                all_digestion.append(df_dig.sort_values("time", ascending=False))
+                sheets["digestion"].append(df_dig.sort_values("time", ascending=False))
 
         # --- MEDS ---
         if val_dict.get("med_valid", False):
@@ -291,9 +292,9 @@ def update_combined_excel(dbx, dropbox_folder_path: str):
                 df_meds = pd.DataFrame(med_list)[["name","dose","time"]]
                 df_meds["time"] = pd.to_datetime(df_meds["time"], errors='coerce')
                 df_meds["File"] = filename
-                all_meds.append(df_meds.sort_values("time", ascending=False))
+                sheets["meds"].append(df_meds.sort_values("time", ascending=False))
 
-    # --- Safer concat_or_empty ---
+    # --- Helper: concat and sort ---
     def concat_or_empty(lst):
         if not lst:
             return pd.DataFrame()
@@ -302,31 +303,30 @@ def update_combined_excel(dbx, dropbox_folder_path: str):
             return df.sort_values("time", ascending=False, na_position="last")
         elif "date" in df.columns:
             return df.sort_values("date", ascending=False, na_position="last")
-        else:
-            return df
+        return df
 
     # --- Combine DataFrames ---
-    hr_stats_df = pd.DataFrame(all_hr_stats).sort_values("date", ascending=False, na_position="last")
-    tachy_df_all = concat_or_empty(all_tachy_events)
-    sleep_stats_df = pd.DataFrame(all_sleep_stats).sort_values("date", ascending=False, na_position="last")
-    weather_stats_df = pd.DataFrame(all_weather_stats)
-    symptoms_df_all = concat_or_empty(all_symptoms)
-    symptom_events_df_all = concat_or_empty(all_symptom_events)
-    conditions_df_all = concat_or_empty(all_conditions)
-    loc_activities_df_all = concat_or_empty(all_loc_activities)
-    stairs_df_all = concat_or_empty(all_stairs)
-    standing_df_all = concat_or_empty(all_standing)
-    walking_df_all = concat_or_empty(all_walking)
-    nutrition_general_df = concat_or_empty(all_nutrition_general)
-    nutrition_meals_df = concat_or_empty(all_nutrition_meals)
-    nutrition_liquids_df = concat_or_empty(all_nutrition_liquids)
-    digestion_df_all = concat_or_empty(all_digestion)
-    meds_df_all = concat_or_empty(all_meds)
-    daily_liquids_df = concat_or_empty(all_daily_liquids)
-    daily_meals_df = concat_or_empty(all_daily_meals)
-    validated_keys_df = pd.DataFrame(all_validated_flags).fillna(False)
+    hr_stats_df = pd.DataFrame(sheets["hr_stats"]).sort_values("date", ascending=False, na_position="last")
+    tachy_df_all = concat_or_empty(sheets["tachy_events"])
+    sleep_stats_df = pd.DataFrame(sheets["sleep"]).sort_values("date", ascending=False, na_position="last")
+    weather_stats_df = pd.DataFrame(sheets["weather"])
+    symptoms_df_all = concat_or_empty(sheets["symptoms"])
+    symptom_events_df_all = concat_or_empty(sheets["symptom_events"])
+    conditions_df_all = concat_or_empty(sheets["conditions"])
+    loc_activities_df_all = concat_or_empty(sheets["activities"])
+    stairs_df_all = concat_or_empty(sheets["stairs"])
+    standing_df_all = concat_or_empty(sheets["standing"])
+    walking_df_all = concat_or_empty(sheets["walking"])
+    nutrition_general_df = concat_or_empty(sheets["nutrition_general"])
+    nutrition_meals_df = concat_or_empty(sheets["nutrition_meals"])
+    nutrition_liquids_df = concat_or_empty(sheets["nutrition_liquids"])
+    digestion_df_all = concat_or_empty(sheets["digestion"])
+    meds_df_all = concat_or_empty(sheets["meds"])
+    daily_liquids_df = concat_or_empty(sheets["daily_liquids"])
+    daily_meals_df = concat_or_empty(sheets["daily_meals"])
+    validated_keys_df = pd.DataFrame(sheets["validated_flags"]).fillna(False)
 
-    # --- Export to Dropbox Excel ---
+    # --- Export to Excel ---
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         hr_stats_df.to_excel(writer, sheet_name="HR Stats", index=False)
@@ -365,4 +365,4 @@ def update_combined_excel(dbx, dropbox_folder_path: str):
     excel_path = f"{dropbox_folder_path}/{EXCEL_FILENAME}"
     dbx.files_upload(output.read(), excel_path, mode=dropbox.files.WriteMode.overwrite)
 
-    print("✅ Incremental Excel updated in Dropbox:", excel_path)
+    print("✅ Incremental parallel Excel updated in Dropbox:", excel_path)
