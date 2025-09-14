@@ -8,6 +8,10 @@ from collections import defaultdict
 import dropbox
 from dropbox.files import WriteMode
 from excel_updater import update_combined_excel
+import importlib
+import excel_updater
+
+importlib.reload(excel_updater)
 
 # -----------------------------
 # Config
