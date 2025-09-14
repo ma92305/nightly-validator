@@ -1,6 +1,6 @@
 import streamlit as st
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import numpy as np
 import matplotlib.pyplot as plt
 import unicodedata
@@ -271,8 +271,13 @@ st.subheader("Good job getting through the day! Let's review it.")
 
 # Initialize selected_date in session_state
 if "selected_date" not in st.session_state:
-    st.session_state.selected_date = date.today()
-
+    now = datetime.now()
+    # If it's between 12:00 AM and 3:59 AM, default to yesterday
+    if 0 <= now.hour < 4:
+        st.session_state.selected_date = date.today() - timedelta(days=1)
+    else:
+        st.session_state.selected_date = date.today()
+        
 # Navigation button handlers
 def go_prev_day():
     st.session_state.selected_date -= timedelta(days=1)
