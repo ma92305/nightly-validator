@@ -491,7 +491,7 @@ with st.expander("Symptoms", expanded=False):
                     ]
                     st.session_state.data = data
                     st.success(f"Removed event: {entry['item']} at {entry_time}")
-                    st.experimental_rerun()
+                    st.rerun()
 
         # --- Add new event
         st.markdown("#### Add New Event")
@@ -525,7 +525,7 @@ with st.expander("Symptoms", expanded=False):
             data["symptom_entries"].append(new_entry)
             st.session_state.data = data
             st.success(f"Added event: {new_event_item} at {new_event_dt.strftime('%-I:%M %p')}")
-            st.experimental_rerun()
+            st.rerun()
     
     # Symptom-only Validate
     if st.button("✅ Validate & Upload Symptoms Only"):
