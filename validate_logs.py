@@ -465,6 +465,52 @@ with st.expander("Symptoms", expanded=False):
     else:
         st.markdown("_No events recorded for this day_")
 
+    # -----------------------------
+    # Editable Event Section
+    # -----------------------------
+    with st.expander("Edit Events", expanded=False):
+        data = st.session_state.data
+        event_entries = [
+            e for e in data.get("symptom_entries", [])
+            if e.get("category", "").lower() == "event"
+        ]
+
+        # --- Remove existing events
+        st.markdown("#### Existing Events")
+        for i, entry in enumerate(event_entries):
+            entry_time = parse_datetime_safe(entry["time"]).strftime("%-I:%M %p")
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                st.markdown(f"{entry_time} - {entry['item']}")
+            with col2:
+                if st.button("Remove", key=f"remove_event_{i}"):
+                    # Remove from symptom_entries
+                    data["symptom_entries"] = [
+                        e for e in data.get("symptom_entries", [])
+                        if not (e.get("item") == entry["item"] and e.get("time") == entry["time"])
+                    ]
+                    st.session_state.data = data
+                    st.success(f"Removed event: {entry['item']} at {entry_time}")
+                    st.experimental_rerun()
+
+        # --- Add new event
+        st.markdown("#### Add New Event")
+        all_events = st.session_state.all_lists.get("events", [])
+        new_event_item = st.selectbox("Select Event", all_events, key="new_event_item")
+        new_event_time = st.time_input("Time of Event", key="new_event_time")
+        
+        if st.button("Add Event"):
+            dt = datetime.combine(selected_date, new_event_time)
+            new_entry = {
+                "item": new_event_item,
+                "time": dt.strftime("%b %-d, %Y at %-I:%M %p"),
+                "category": "Event"
+            }
+            data["symptom_entries"].append(new_entry)
+            st.session_state.data = data
+            st.success(f"Added event: {new_event_item} at {dt.strftime('%-I:%M %p')}")
+            st.experimental_rerun()
+    
     # Symptom-only Validate
     if st.button("✅ Validate & Upload Symptoms Only"):
         data = st.session_state.data
