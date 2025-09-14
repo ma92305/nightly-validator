@@ -7,6 +7,7 @@ import unicodedata
 from collections import defaultdict
 import dropbox
 from dropbox.files import WriteMode
+from excel_updater import update_combined_excel
 
 # -----------------------------
 # Config
@@ -620,7 +621,10 @@ with st.expander("Symptoms", expanded=False):
             data["validated_entries"][0]["symptoms_valid"] = "true"
 
         save_log(selected_date, data)
-        st.success("✅ Symptom timelines validated & uploaded (events preserved)!")
+        st.success("✅ Symptom timelines validated & uploaded!")
+        
+        # silently update combined Excel
+        update_combined_excel("/HealthLogs")  # the folder in Dropbox
 
 # -----------------------------
 # Streamlit App - Conditions / Activities Section (Simple List)
@@ -803,6 +807,7 @@ with st.expander("Conditions & Activities", expanded=False):
         save_log(selected_date, data)
         st.success("✅ Condition & Activity entries saved and validated (status preserved)!")
 
+        update_combined_excel("/HealthLogs")  # the folder in Dropbox
 
 # -----------------------------
 # Streamlit App - Nutrition Section (Simple List)
@@ -941,6 +946,8 @@ with st.expander("Nutrition", expanded=False):
         save_log(selected_date, data)
         st.success("✅ Nutrition entries saved and validated!")
 
+        update_combined_excel("/HealthLogs")  # the folder in Dropbox
+
 # -----------------------------
 # Streamlit App - Digestion Section (Simple List)
 # -----------------------------
@@ -1078,6 +1085,7 @@ with st.expander("Digestion", expanded=False):
         save_log(selected_date, data)
         st.success("✅ Digestion entries saved and validated!")
 
+        update_combined_excel("/HealthLogs")
 # -----------------------------
 # Reproductive Section
 # -----------------------------
@@ -1149,6 +1157,8 @@ with st.expander("Reproductive", expanded=False):
         save_log(selected_date, data)
         st.success("✅ Reproductive data saved and validated!")
 
+        update_combined_excel("/HealthLogs")
+        
 # -----------------------------
 # Medication Section
 # -----------------------------
