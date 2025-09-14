@@ -279,13 +279,13 @@ with st.expander("Symptoms", expanded=False):
     # Load data on date change
     if "loaded_date" not in st.session_state or st.session_state.loaded_date != selected_date:
         st.session_state.loaded_date = selected_date
-        data = load_log(selected_date)
+        data = get_log(selected_date)
         st.session_state.data = data
         symptom_entries = data.get("symptom_entries", [])
 
         # --- previous night last entries
         prev_date = selected_date - timedelta(days=1)
-        prev_data = load_log(prev_date)
+        prev_data = get_log(prev_date)
         prev_entries = prev_data.get("symptom_entries", [])
         prev_last_entry = {}
         for symptom in STANDARD_SYMPTOMS:
@@ -434,7 +434,7 @@ with st.expander("Symptoms", expanded=False):
 
         # previous night last entries
         prev_date = selected_date - timedelta(days=1)
-        prev_data = load_log(prev_date)
+        prev_data = get_log(prev_date)
         prev_entries = prev_data.get("symptom_entries", [])
         prev_last_entry = {}
         for symptom in STANDARD_SYMPTOMS:
@@ -562,7 +562,7 @@ with st.expander("Conditions & Activities", expanded=False):
     # Load data if not loaded yet
     if "loaded_conditions_date" not in st.session_state or st.session_state.loaded_conditions_date != selected_date:
         st.session_state.loaded_conditions_date = selected_date
-        data = load_log(selected_date)
+        data = get_log(selected_date)
         st.session_state.data = data
         condition_entries = data.get("condition_entries", [])
         st.session_state.original_conditions = condition_entries.copy()
@@ -683,7 +683,7 @@ with st.expander("Nutrition", expanded=False):
 
     if "loaded_nutrition_date" not in st.session_state or st.session_state.loaded_nutrition_date != selected_date:
         st.session_state.loaded_nutrition_date = selected_date
-        data = load_log(selected_date) or {}
+        data = get_log(selected_date) or {}
         st.session_state.data = data
         nutrition_entries = data.get("nutrition_entries", [])
         st.session_state.original_nutrition = json.loads(json.dumps(nutrition_entries))
@@ -841,7 +841,7 @@ with st.expander("Digestion", expanded=False):
     if st.session_state.loaded_digestion_date != selected_date:
         st.session_state.loaded_digestion_date = selected_date
         # Load from Dropbox instead of local iCloud
-        data = load_log(selected_date) or {}
+        data = get_log(selected_date) or {}
         st.session_state.data = data
         digestion_entries = data.get("digestion_entries", [])
         st.session_state.original_digestion = json.loads(json.dumps(digestion_entries))
@@ -1032,7 +1032,7 @@ with st.expander("Meds", expanded=False):
     # -----------------------------
     if "loaded_med_date" not in st.session_state or st.session_state.loaded_med_date != selected_date:
         st.session_state.loaded_med_date = selected_date
-        data = load_log(selected_date)
+        data = get_log(selected_date)
         st.session_state.data = data
         med_entries = data.get("med_entries", [])
         st.session_state.original_med = med_entries.copy()
