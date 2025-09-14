@@ -1385,3 +1385,22 @@ with st.expander("Meds", expanded=False):
 
         # inside your app
         update_combined_excel(dbx, DROPBOX_FOLDER)
+
+# -----------------------------
+# Excel update controls (bottom of page)
+# -----------------------------
+st.markdown("---")
+st.header("📊 Update Combined Excel")
+
+force_rebuild = st.checkbox(
+    "Force rebuild Excel (ignore incremental cache)", value=False
+)
+
+if st.button("Update Combined Excel"):
+    if force_rebuild:
+        update_combined_excel(dbx, DROPBOX_FOLDER, force_rebuild=True)
+    else:
+        update_combined_excel(dbx, DROPBOX_FOLDER)
+
+    st.success("✅ Combined Excel updated in Dropbox")
+
