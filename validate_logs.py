@@ -264,12 +264,47 @@ def plot_timeline_matplotlib(timeline, symptom, fig_height=1):
 # -----------------------------
 # Streamlit UI - Header / Date
 # -----------------------------
+from datetime import date, timedelta
+
 st.title("Daily Health Check-in")
 st.subheader("Good job getting through the day! Let's review it.")
 
-selected_date = st.date_input("Select Date", datetime.today(), key="selected_date")
-if st.button("Today"):
-    st.session_state.selected_date = datetime.today().date()
+# Initialize selected_date in session_state
+if "selected_date" not in st.session_state:
+    st.session_state.selected_date = date.today()
+
+# Navigation button handlers
+def go_prev_day():
+    st.session_state.selected_date -= timedelta(days=1)
+
+def go_next_day():
+    st.session_state.selected_date += timedelta(days=1)
+
+def go_today():
+    st.session_state.selected_date = date.today()
+
+# ---- Navigation row ----
+col1, col2, col3 = st.columns([1,1,1])
+
+with col1:
+    st.button("⬅️ Previous", on_click=go_prev_day)
+
+with col2:
+    st.button("📅 Today", on_click=go_today)
+
+with col3:
+    # Only show next-day button if it's not in the future
+    if st.session_state.selected_date < date.today():
+        st.button("Next ➡️", on_click=go_next_day)
+
+# ---- Date input ----
+st.session_state.selected_date = st.date_input(
+    "Pick a date",
+    value=st.session_state.selected_date,
+    key="selected_date"
+)
+
+selected_date = st.session_state.selected_date
 
 # -----------------------------
 # Symptoms Section (full logic preserved)
