@@ -663,15 +663,13 @@ with st.expander("Conditions & Activities", expanded=False):
 
 with st.expander("Nutrition", expanded=False):
 
-    # Load data if not loaded yet
     if "loaded_nutrition_date" not in st.session_state or st.session_state.loaded_nutrition_date != selected_date:
         st.session_state.loaded_nutrition_date = selected_date
-        # Load from Dropbox instead of local iCloud
-        data = dropbox_read_json(f"HealthLogs/health_log_{selected_date}.json") or {}
+        data = load_log(selected_date) or {}
         st.session_state.data = data
         nutrition_entries = data.get("nutrition_entries", [])
-        st.session_state.original_nutrition = nutrition_entries.copy()
-        st.session_state.nutrition = nutrition_entries.copy()
+        st.session_state.original_nutrition = json.loads(json.dumps(nutrition_entries))
+        st.session_state.nutrition = json.loads(json.dumps(nutrition_entries))
 
     col_add, col_remove, col_reset = st.columns(3)
     with col_add:
@@ -825,11 +823,11 @@ with st.expander("Digestion", expanded=False):
     if st.session_state.loaded_digestion_date != selected_date:
         st.session_state.loaded_digestion_date = selected_date
         # Load from Dropbox instead of local iCloud
-        data = dropbox_read_json(f"HealthLogs/health_log_{selected_date}.json") or {}
+        data = load_log(selected_date) or {}
         st.session_state.data = data
         digestion_entries = data.get("digestion_entries", [])
-        st.session_state.original_digestion = digestion_entries.copy()
-        st.session_state.digestion = digestion_entries.copy()
+        st.session_state.original_digestion = json.loads(json.dumps(digestion_entries))
+        st.session_state.digestion = json.loads(json.dumps(digestion_entries))
         st.session_state.show_add_digestion = False
         st.session_state.show_remove_digestion = False
 
