@@ -298,13 +298,11 @@ with col3:
         st.button("Next ➡️", on_click=go_next_day)
 
 # ---- Date input ----
-st.session_state.selected_date = st.date_input(
+selected_date = st.date_input(
     "Pick a date",
     value=st.session_state.selected_date,
     key="selected_date"
 )
-
-selected_date = st.session_state.selected_date
 
 # -----------------------------
 # Symptoms Section (full logic preserved)
