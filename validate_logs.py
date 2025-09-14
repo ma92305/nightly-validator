@@ -249,8 +249,10 @@ def plot_timeline_matplotlib(timeline, symptom, fig_height=1):
 
     # X-axis: tick for every hour
     max_min = len(timeline)
-    xticks = [i*60 for i in range(24) if i*60 < max_min]  # 0, 60, 120, ..., up to timeline length
+    xticks = [i*60 for i in range(25) if i*60 <= max_min]  # include 24*60
+    xticklabels = [(h % 12) or 12 for h in range(len(xticks))]  # 12-hour clock
     ax.set_xticks(xticks)
+    ax.set_xticklabels(xticklabels)
 
     # 12-hour clock labels
     xticklabels = [(h % 12) or 12 for h in range(len(xticks))]
