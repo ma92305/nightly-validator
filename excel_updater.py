@@ -108,8 +108,12 @@ def update_combined_excel(dbx, dropbox_folder_path: str):
         # --- Extract date ---
         file_date = pd.to_datetime(entry.name.split("_")[-1].replace(".txt",""), errors='coerce').date()
 
-        # --- HEART RATE ---
-        hr = data.get("heartrate_entries", {}) or {}
+        hr = data.get("heartrate_entries", {})
+
+        # ensure it's a dict
+        if isinstance(hr, list):
+            hr = hr[0] if hr else {}  # take first item or empty dict
+
         all_hr_stats.append({
             "File": entry.name,
             "HR_max": hr.get("HR_max"),
