@@ -374,6 +374,382 @@ with st.expander("Symptoms", expanded=False):
         # plot
         plot_timeline_matplotlib(st.session_state.timelines[symptom], symptom)
 
+import streamlit as st
+import json
+from datetime import date, datetime, timedelta
+import numpy as np
+import matplotlib.pyplot as plt
+import unicodedata
+from collections import defaultdict
+import dropbox
+from dropbox.files import WriteMode
+
+# -----------------------------
+# Config
+# -----------------------------
+st.set_page_config(
+    page_title="Nightly Validator",
+    page_icon="favicon.png",  # can also use an emoji like "🩺"
+)
+
+dbx = dropbox.Dropbox(
+    oauth2_refresh_token=st.secrets["dropbox_refresh_token"],
+    app_key=st.secrets["dropbox_app_key"],
+    app_secret=st.secrets["dropbox_app_secret"]
+)
+
+DROPBOX_FOLDER = "/HealthLogs"  # your folder in Dropbox
+
+SEVERITIES = ["None", "⚪️", "🟡", "🟠", "🔴", "🟣"]
+
+COLOR_MAP = {
+    "None": (0.6, 0.6, 0.6),
+    "⚪️": (1.0, 1.0, 1.0),
+    "🟡": (1.0, 1.0, 0.0),
+    "🟠": (1.0, 0.65, 0.0),
+    "🔴": (1.0, 0.0, 0.0),
+    "🟣": (0.5, 0.0, 0.5),
+}
+
+MINUTES_IN_DAY = 24 * 60
+
+# -----------------------------
+# Refresh Button + Cached Loader
+# -----------------------------
+st.sidebar.button("🔄 Refresh Data", on_click=lambda: st.session_state.pop("cached_logs", None))
+
+def get_log(date):
+    """Load log for a date, but only fetch from Dropbox if not cached or if refreshed."""
+    if "cached_logs" not in st.session_state:
+        st.session_state.cached_logs = {}
+
+    key = date.strftime("%Y-%m-%d")
+
+    if key not in st.session_state.cached_logs:
+        log = load_log(date) or {}
+        st.session_state.cached_logs[key] = log
+
+    return st.session_state.cached_logs[key]
+
+# -----------------------------
+# Dropbox Helpers (define first)
+# -----------------------------
+def dropbox_read_json(filename):
+    """Read JSON file from Dropbox HealthLogs folder"""
+    path = f"{DROPBOX_FOLDER}/{filename}"
+    try:
+        md, res = dbx.files_download(path)
+        return json.loads(res.content.decode("utf-8"))
+    except dropbox.exceptions.ApiError:
+        return {}
+    except Exception:
+        return {}
+
+def dropbox_write_json(filename, data):
+    """Write JSON file to Dropbox HealthLogs folder"""
+    path = f"{DROPBOX_FOLDER}/{filename}"
+    dbx.files_upload(
+        json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"),
+        path,
+        mode=WriteMode.overwrite
+    )
+
+def load_log(date):
+    filename = f"health_log_{date.strftime('%Y-%m-%d')}.txt"
+    return dropbox_read_json(filename)
+
+def save_log(date, data):
+    """
+    Save a day's JSON to Dropbox. This restores emoji/time formats
+    and sets data['validated']=True (keeps your existing behavior).
+    """
+    # Ensure we don't mutate original object passed in (copy)
+    data_to_save = json.loads(json.dumps(data))  # shallow deep-copy via JSON
+    data_to_save["validated"] = True
+
+    restored_data = restore_emojis_and_times(data_to_save)
+    filename = f"health_log_{date.strftime('%Y-%m-%d')}.txt"
+    dropbox_write_json(filename, restored_data)
+
+# -----------------------------
+# Load reference lists ONCE (cached)
+# -----------------------------
+if "all_lists" not in st.session_state:
+    all_lists = dropbox_read_json("all_lists.json")
+    if not all_lists:
+        st.error("⚠️ all_lists.json not found in Dropbox /HealthLogs")
+        all_lists = {}
+    st.session_state.all_lists = all_lists
+
+ALL_CONDITIONS = st.session_state.all_lists.get("conditions", [])
+NUTRITION_OPTIONS = st.session_state.all_lists.get("nutrition", [])
+STANDARD_SYMPTOMS = st.session_state.all_lists.get("symptoms", [])
+CONDITION_OPTIONS = st.session_state.all_lists.get("conditions", [])
+AMOUNT_OPTIONS = ["A little", "Some", "Moderate", "A lot"]
+
+# -----------------------------
+# Utils
+# -----------------------------
+def normalize_emoji(s):
+    if not isinstance(s, str):
+        return s
+    return unicodedata.normalize("NFKC", s).strip()
+
+def parse_datetime_safe(time_str):
+    """
+    Accepts ISO dates and the custom format "<Mon> <D>, <YYYY> at <H>:<MM> <AM/PM>".
+    """
+    try:
+        return datetime.fromisoformat(time_str)
+    except Exception:
+        try:
+            time_str_clean = time_str.replace("\u202f", " ")
+            return datetime.strptime(time_str_clean, "%b %d, %Y at %I:%M %p")
+        except Exception as e:
+            st.error(f"Failed to parse time: {time_str}")
+            raise e
+
+def restore_emojis_and_times(obj):
+    """Ensure severity codes are emojis and times use the desired format."""
+    if isinstance(obj, list):
+        return [restore_emojis_and_times(x) for x in obj]
+    elif isinstance(obj, dict):
+        new_dict = {}
+        for k, v in obj.items():
+            if k == "severity" and isinstance(v, str):
+                new_dict[k] = normalize_emoji(v)
+            elif k in ("time", "time_taken") and isinstance(v, str):
+                # try parse several formats, preserve if unknown
+                dt = None
+                try:
+                    dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
+                except Exception:
+                    try:
+                        dt = datetime.strptime(v, "%b %d, %Y at %I:%M %p")
+                    except Exception:
+                        try:
+                            # med time format fallback
+                            dt = datetime.strptime(v, "%Y-%m-%d %H:%M")
+                        except Exception:
+                            dt = None
+                if dt:
+                    # Format chosen to match original style
+                    if k == "time_taken":
+                        new_dict[k] = dt.strftime("%Y-%m-%d %H:%M")
+                    else:
+                        # use same format as original files
+                        new_dict[k] = dt.strftime("%b %-d, %Y at %-I:%M %p")
+                else:
+                    new_dict[k] = v
+            else:
+                new_dict[k] = restore_emojis_and_times(v)
+        return new_dict
+    elif isinstance(obj, str):
+        return normalize_emoji(obj)
+    return obj
+
+# -----------------------------
+# Build minute timeline
+# -----------------------------
+def build_minute_timeline(entries, selected_date, prev_last_entry="⚪️", universal_start_min=None):
+    timeline = ["⚪️"] * MINUTES_IN_DAY
+
+    # Sort entries by time (guard entries lacking time)
+    entries_sorted = sorted(entries, key=lambda e: parse_datetime_safe(e["time"]) if e.get("time") else datetime.min)
+
+    # Apply real entries first
+    for i, entry in enumerate(entries_sorted):
+        if not entry.get("time"):
+            continue
+        entry_min = (parse_datetime_safe(entry["time"]) - datetime.combine(selected_date, datetime.min.time())).seconds // 60
+        if i + 1 < len(entries_sorted):
+            next_min = (parse_datetime_safe(entries_sorted[i + 1]["time"]) - datetime.combine(selected_date, datetime.min.time())).seconds // 60
+        else:
+            next_min = MINUTES_IN_DAY
+        # guard bounds
+        entry_min = max(0, min(entry_min, MINUTES_IN_DAY))
+        next_min = max(0, min(next_min, MINUTES_IN_DAY))
+        if next_min > entry_min:
+            timeline[entry_min:next_min] = [entry.get("severity", "⚪️")] * (next_min - entry_min)
+
+    # Midnight → 3AM: carry over previous night value only if still default
+    for i in range(0, 3*60):
+        if timeline[i] == "⚪️":
+            timeline[i] = prev_last_entry
+
+    # 3AM exactly: set to "None"
+    timeline[3*60] = "None"
+
+    # Determine universal start if not provided
+    if universal_start_min is None:
+        post_3am_entries = [
+            e for e in entries_sorted
+            if e.get("time") and (parse_datetime_safe(e["time"]) - datetime.combine(selected_date, datetime.min.time())).seconds // 60 > 3*60
+        ]
+        if post_3am_entries:
+            universal_start_dt = min(parse_datetime_safe(e["time"]) for e in post_3am_entries)
+            universal_start_min = (universal_start_dt - datetime.combine(selected_date, datetime.min.time())).seconds // 60
+        else:
+            universal_start_min = 3*60 + 1  # fallback
+
+    # 3AM → universal_start: fill "None"
+    for i in range(3*60 + 1, universal_start_min):
+        if i < MINUTES_IN_DAY:
+            timeline[i] = "None"
+
+    # From universal_start onward: carry forward last known value
+    last_known = timeline[universal_start_min] if universal_start_min < MINUTES_IN_DAY else "⚪️"
+    for i in range(universal_start_min, MINUTES_IN_DAY):
+        if timeline[i] not in ["None"]:
+            last_known = timeline[i]
+        else:
+            timeline[i] = last_known
+
+    # Cut off at current time if today
+    now = datetime.now()
+    if selected_date == now.date():
+        timeline = timeline[:now.hour*60 + now.minute]
+
+    return timeline
+
+# -----------------------------
+# Plot timeline with "None" support
+# -----------------------------
+def plot_timeline_matplotlib(timeline, symptom, fig_height=1):
+    if not timeline:
+        timeline = ["None"]
+    arr_rgb = np.array([[COLOR_MAP.get(normalize_emoji(s), (0,0,0)) for s in timeline]])
+    fig, ax = plt.subplots(figsize=(12, fig_height))
+    ax.imshow(arr_rgb, aspect='auto')
+    ax.set_yticks([])
+
+    # X-axis: tick for every hour
+    max_min = len(timeline)
+    xticks = [i*60 for i in range(25) if i*60 <= max_min]  # include 24*60
+    xticklabels = [(h % 12) or 12 for h in range(len(xticks))]  # 12-hour clock
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xticklabels)
+
+    # 12-hour clock labels
+    xticklabels = [(h % 12) or 12 for h in range(len(xticks))]
+    ax.set_xticklabels(xticklabels)
+
+    ax.set_title(symptom, fontsize=10)
+    ax.set_facecolor("lightgray")
+    st.pyplot(fig)
+    plt.close(fig)
+
+# -----------------------------
+# Streamlit UI - Header / Date
+# -----------------------------
+
+# Initialize selected_date in session_state
+if "selected_date" not in st.session_state:
+    now = datetime.now()
+    # If it's between 12:00 AM and 3:59 AM, default to yesterday
+    if 0 <= now.hour < 4:
+        st.session_state.selected_date = date.today() - timedelta(days=1)
+    else:
+        st.session_state.selected_date = date.today()
+
+# Navigation button handlers
+def go_prev_day():
+    st.session_state.selected_date -= timedelta(days=1)
+
+def go_next_day():
+    st.session_state.selected_date += timedelta(days=1)
+
+def go_today():
+    now = datetime.now()
+    if 0 <= now.hour < 4:
+        st.session_state.selected_date = date.today() - timedelta(days=1)
+    else:
+        st.session_state.selected_date = date.today()
+
+# ---- Navigation row ----
+col1, col2, col3 = st.columns([1,1,1])
+
+with col1:
+    st.button("⬅️ Previous", on_click=go_prev_day)
+
+with col2:
+    st.button("📅 Today", on_click=go_today)
+
+with col3:
+    # Only show next-day button if it's not in the future
+    if st.session_state.selected_date < date.today():
+        st.button("Next ➡️", on_click=go_next_day)
+
+# ---- Date input ----
+selected_date = st.date_input(
+    "Pick a date",
+    value=st.session_state.selected_date,
+    key="selected_date"
+)
+
+# -----------------------------
+# Symptoms Section (full logic preserved)
+# -----------------------------
+with st.expander("Symptoms", expanded=False):
+
+    # Load data on date change
+    if "loaded_date" not in st.session_state or st.session_state.loaded_date != selected_date:
+        st.session_state.loaded_date = selected_date
+        data = get_log(selected_date)
+        st.session_state.data = data
+        symptom_entries = data.get("symptom_entries", [])
+
+        # --- previous night last entries
+        prev_date = selected_date - timedelta(days=1)
+        prev_data = get_log(prev_date)
+        prev_entries = prev_data.get("symptom_entries", [])
+        prev_last_entry = {}
+        for symptom in STANDARD_SYMPTOMS:
+            entries_prev = [e for e in prev_entries if e.get("item") == symptom]
+            if entries_prev:
+                entries_prev_sorted = sorted(entries_prev, key=lambda e: parse_datetime_safe(e["time"]))
+                prev_last_entry[symptom] = entries_prev_sorted[-1].get("severity", "⚪️")
+            else:
+                prev_last_entry[symptom] = "⚪️"
+
+        # --- universal earliest across all symptoms (after 3AM)
+        all_post_3am_entries = [
+            e for e in symptom_entries
+            if e.get("time") and (parse_datetime_safe(e["time"]) - datetime.combine(selected_date, datetime.min.time())).seconds // 60 > 3*60
+        ]
+        if all_post_3am_entries:
+            universal_start_dt = min(parse_datetime_safe(e["time"]) for e in all_post_3am_entries)
+            universal_start_min = (universal_start_dt - datetime.combine(selected_date, datetime.min.time())).seconds // 60
+        else:
+            universal_start_min = 3*60 + 1  # fallback if no entries after 3AM
+
+        st.session_state.original_timelines = {}
+        for symptom in STANDARD_SYMPTOMS:
+            entries = [e for e in symptom_entries if e.get("item") == symptom]
+            st.session_state.original_timelines[symptom] = build_minute_timeline(
+                entries,
+                selected_date,
+                prev_last_entry=prev_last_entry.get(symptom, "⚪️"),
+                universal_start_min=universal_start_min
+            )
+
+        st.session_state.timelines = {
+            symptom: st.session_state.original_timelines[symptom].copy()
+            for symptom in STANDARD_SYMPTOMS
+        }
+
+    # --- Display each symptom
+    for symptom in STANDARD_SYMPTOMS:
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            st.markdown(f"**{symptom}**", unsafe_allow_html=True)
+        with col2:
+            if st.button("Edit", key=f"edit_{symptom}"):
+                st.session_state[f"expander_{symptom}"] = not st.session_state.get(f"expander_{symptom}", False)
+
+        # plot
+        plot_timeline_matplotlib(st.session_state.timelines[symptom], symptom)
+
         # Conditional editing UI
         if st.session_state.get(f"expander_{symptom}", False):
             st.markdown(f"**Edit Timeline for {symptom}**")
@@ -434,6 +810,115 @@ with st.expander("Symptoms", expanded=False):
                 st.success("Timeline reset to original file data.")
                 st.rerun()
 
+    # Event Timeline
+    st.markdown("### Event Timeline")
+    event_entries = [
+        e for e in st.session_state.data.get("symptom_entries", [])
+        if e.get("category", "").lower() == "event"
+    ]
+    if event_entries:
+        event_entries_sorted = sorted(event_entries, key=lambda e: parse_datetime_safe(e["time"]))
+        for entry in event_entries_sorted:
+            entry_time = parse_datetime_safe(entry["time"]).strftime("%-I:%M %p")
+            st.markdown(f"{entry_time} - {entry['item']}")
+    else:
+        st.markdown("_No events recorded for this day_")
+
+    # Symptom-only Validate
+    if st.button("✅ Validate & Upload Symptoms Only"):
+        data = st.session_state.data
+
+        # --- Sync edited timelines into data first
+        new_entries_all = []
+        for symptom in STANDARD_SYMPTOMS:
+            timeline = st.session_state.timelines[symptom]
+            last_sev = timeline[0]
+            start_min = 0
+            for i, sev in enumerate(timeline):
+                if sev != last_sev:
+                    dt = datetime.combine(selected_date, datetime.min.time()) + timedelta(minutes=start_min)
+                    new_entries_all.append({
+                        "item": symptom,
+                        "time": dt.strftime("%b %-d, %Y at %-I:%M %p"),
+                        "severity": last_sev
+                    })
+                    last_sev = sev
+                    start_min = i
+            dt = datetime.combine(selected_date, datetime.min.time()) + timedelta(minutes=start_min)
+            new_entries_all.append({
+                "item": symptom,
+                "time": dt.strftime("%b %-d, %Y at %-I:%M %p"),
+                "severity": last_sev
+            })
+
+        # Preserve events
+        event_entries = [
+            e for e in data.get("symptom_entries", [])
+            if e.get("category", "").lower() == "event"
+        ]
+        data["symptom_entries"] = new_entries_all + event_entries
+
+        # previous night last entries
+        prev_date = selected_date - timedelta(days=1)
+        prev_data = get_log(prev_date)
+        prev_entries = prev_data.get("symptom_entries", [])
+        prev_last_entry = {}
+        for symptom in STANDARD_SYMPTOMS:
+            entries_prev = [e for e in prev_entries if e.get("item") == symptom]
+            if entries_prev:
+                entries_prev_sorted = sorted(entries_prev, key=lambda e: parse_datetime_safe(e["time"]))
+                prev_last_entry[symptom] = entries_prev_sorted[-1].get("severity", "⚪️")
+            else:
+                prev_last_entry[symptom] = "⚪️"
+
+        # universal earliest across all symptoms after 3AM
+        symptom_entries = data.get("symptom_entries", [])
+        all_post_3am_entries = [
+            e for e in symptom_entries
+            if e.get("time") and (parse_datetime_safe(e["time"]) - datetime.combine(selected_date, datetime.min.time())).seconds // 60 > 3*60
+        ]
+        if all_post_3am_entries:
+            universal_earliest = min(parse_datetime_safe(e["time"]) for e in all_post_3am_entries)
+            universal_earliest_min = (universal_earliest - datetime.combine(selected_date, datetime.min.time())).seconds // 60
+        else:
+            universal_earliest_min = 3*60  # fallback
+
+        for symptom in STANDARD_SYMPTOMS:
+            timeline = st.session_state.timelines[symptom]
+
+            # Midnight → 3AM: fill only None minutes with previous night value
+            for i in range(0, min(3*60, len(timeline))):
+                if timeline[i] == "None":
+                    timeline[i] = prev_last_entry.get(symptom, "⚪️")
+
+            # 3AM → universal earliest: fill only None minutes
+            for i in range(3*60, min(universal_earliest_min, len(timeline))):
+                if timeline[i] == "None":
+                    timeline[i] = "None"
+
+            # Universal earliest → rest of timeline: carry forward last known value
+            last_known = prev_last_entry.get(symptom, "⚪️")
+            for i in range(universal_earliest_min, len(timeline)):
+                if timeline[i] != "None":
+                    last_known = timeline[i]
+                elif last_known:
+                    timeline[i] = last_known
+
+        # Update validated_entries
+        if "validated_entries" not in data or not data["validated_entries"]:
+            data["validated_entries"] = [{
+                "symptoms_valid": "true",
+                "conditions_valid": "false",
+                "nutrition_valid": "false",
+                "digestion_valid": "false",
+                "reproductive_valid": "false"
+            }]
+        else:
+            data["validated_entries"][0]["symptoms_valid"] = "true"
+
+        save_log(selected_date, data)
+        st.success("✅ Symptom timelines validated & uploaded (events preserved)!")
+        
     # Event Timeline
     st.markdown("### Event Timeline")
     event_entries = [
