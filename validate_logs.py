@@ -623,8 +623,8 @@ with st.expander("Symptoms", expanded=False):
         save_log(selected_date, data)
         st.success("✅ Symptom timelines validated & uploaded!")
         
-        # silently update combined Excel
-        update_combined_excel("/HealthLogs")  # the folder in Dropbox
+        # inside your app
+        update_combined_excel(dbx, DROPBOX_FOLDER)
 
 # -----------------------------
 # Streamlit App - Conditions / Activities Section (Simple List)
@@ -807,7 +807,8 @@ with st.expander("Conditions & Activities", expanded=False):
         save_log(selected_date, data)
         st.success("✅ Condition & Activity entries saved and validated (status preserved)!")
 
-        update_combined_excel("/HealthLogs")  # the folder in Dropbox
+        # inside your app
+        update_combined_excel(dbx, DROPBOX_FOLDER)
 
 # -----------------------------
 # Streamlit App - Nutrition Section (Simple List)
@@ -946,8 +947,9 @@ with st.expander("Nutrition", expanded=False):
         save_log(selected_date, data)
         st.success("✅ Nutrition entries saved and validated!")
 
-        update_combined_excel("/HealthLogs")  # the folder in Dropbox
-
+        # inside your app
+        update_combined_excel(dbx, DROPBOX_FOLDER)
+        
 # -----------------------------
 # Streamlit App - Digestion Section (Simple List)
 # -----------------------------
@@ -1085,7 +1087,9 @@ with st.expander("Digestion", expanded=False):
         save_log(selected_date, data)
         st.success("✅ Digestion entries saved and validated!")
 
-        update_combined_excel("/HealthLogs")
+        # inside your app
+        update_combined_excel(dbx, DROPBOX_FOLDER)
+
 # -----------------------------
 # Reproductive Section
 # -----------------------------
@@ -1157,7 +1161,8 @@ with st.expander("Reproductive", expanded=False):
         save_log(selected_date, data)
         st.success("✅ Reproductive data saved and validated!")
 
-        update_combined_excel("/HealthLogs")
+        # inside your app
+        update_combined_excel(dbx, DROPBOX_FOLDER)
         
 # -----------------------------
 # Medication Section
@@ -1374,3 +1379,6 @@ with st.expander("Meds", expanded=False):
 
         save_log(selected_date, data)
         st.success("✅ Medication entries saved and validated!")
+
+        # inside your app
+        update_combined_excel(dbx, DROPBOX_FOLDER)
