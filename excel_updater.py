@@ -388,36 +388,36 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
         meds_df_all.to_excel(writer, sheet_name="Meds", index=False)
         validated_keys_df.to_excel(writer, sheet_name="Validated Keys", index=False)
 
-for sheet_name, worksheet in writer.sheets.items():
-    # Map sheet names to corresponding DataFrames
-    df_map = {
-        "HR Stats": hr_stats_df,
-        "Tachy Events": tachy_df_all,
-        "Sleep Stats": sleep_stats_df,
-        "Weather Stats": weather_stats_df,
-        "Hourly Weather": hourly_weather_df,
-        "Symptoms": symptoms_df_all,
-        "Symptom Events": symptom_events_df_all,
-        "Conditions": conditions_df_all,
-        "Locations": loc_activities_df_all,
-        "Stairs": stairs_df_all,
-        "Standing": standing_df_all,
-        "Walking": walking_df_all,
-        "Nutrition - General": nutrition_general_df,
-        "Nutrition - Meals": nutrition_meals_df,
-        "Nutrition - Liquids": nutrition_liquids_df,
-        "Digestion": digestion_df_all,
-        "Meds": meds_df_all,
-        "Validated Keys": validated_keys_df,
-        "Daily Liquids": daily_liquids_df,
-        "Daily Meals": daily_meals_df
-    }
+        for sheet_name, worksheet in writer.sheets.items():
+            # Map sheet names to corresponding DataFrames
+            df_map = {
+                "HR Stats": hr_stats_df,
+                "Tachy Events": tachy_df_all,
+                "Sleep Stats": sleep_stats_df,
+                "Weather Stats": weather_stats_df,
+                "Hourly Weather": hourly_weather_df,
+                "Symptoms": symptoms_df_all,
+                "Symptom Events": symptom_events_df_all,
+                "Conditions": conditions_df_all,
+                "Locations": loc_activities_df_all,
+                "Stairs": stairs_df_all,
+                "Standing": standing_df_all,
+                "Walking": walking_df_all,
+                "Nutrition - General": nutrition_general_df,
+                "Nutrition - Meals": nutrition_meals_df,
+                "Nutrition - Liquids": nutrition_liquids_df,
+                "Digestion": digestion_df_all,
+                "Meds": meds_df_all,
+                "Validated Keys": validated_keys_df,
+                "Daily Liquids": daily_liquids_df,
+                "Daily Meals": daily_meals_df
+            }
 
-    df = df_map.get(sheet_name)
-    if df is not None and not df.empty:
-        for i, col in enumerate(df.columns):
-            max_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
-            worksheet.set_column(i, i, max_len)
+            df = df_map.get(sheet_name)
+            if df is not None and not df.empty:
+                for i, col in enumerate(df.columns):
+                    max_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
+                    worksheet.set_column(i, i, max_len)
     
     output.seek(0)
     excel_path = f"{dropbox_folder_path}/{EXCEL_FILENAME}"
