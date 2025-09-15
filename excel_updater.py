@@ -142,7 +142,8 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5):
         "stairs": [], "standing": [], "walking": [],
         "nutrition_general": [], "nutrition_meals": [], "nutrition_liquids": [],
         "digestion": [], "meds": [], "daily_liquids": [], "daily_meals": [],
-        "validated_flags": []
+        "validated_flags": [],
+        "hourly_weather": []   # <--- add this line
     }
 
     # --- Process cached logs ---
@@ -206,6 +207,29 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5):
             stats["date"] = sleep_date
             sheets["weather"].append(stats)
 
+        # --- HOURLY WEATHER ---
+        hourly_data = weather.get("hourly", [])
+        if hourly_data:
+                df_hourly = pd.DataFrame(hourly_data)
+                df_hourly['time'] = pd.to_datetime(df_hourly['time'])
+                df_hourly['Date'] = df_hourly['time'].dt.date
+                df_hourly['Hour'] = df_hourly['time'].dt.hour
+                df_hourly['pressure'] = pd.to_numeric(df_hourly['pressure'], errors='coerce')
+
+                # Calculate cumulative pressure change over 6 hours
+                df_hourly['Pressure Change (inHg)'] = df_hourly['pressure'].diff(periods=6).fillna(0)
+
+                # Flag rapid changes
+                df_hourly['Pressure Trend'] = df_hourly['Pressure Change (inHg)'].apply(
+                        lambda x: 'Rapid Rise' if x > 0.09 else ('Rapid Fall' if x < -0.09 else 'Stable')
+                )
+
+                # Flag low pressure
+                df_hourly['Low Pressure Flag'] = df_hourly['pressure'].apply(lambda x: 'Yes' if x <= 30.00 else 'No')
+
+                df_hourly['File'] = filename
+                sheets["hourly_weather"].append(df_hourly)
+        
         # --- SYMPTOMS ---
         if val_dict.get("symptoms_valid", False):
             symptoms = clean_entries(data.get("symptom_entries", []), required_fields=["item", "time"])
@@ -360,7 +384,10 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5):
         digestion_df_all.to_excel(writer, sheet_name="Digestion", index=False)
         meds_df_all.to_excel(writer, sheet_name="Meds", index=False)
         validated_keys_df.to_excel(writer, sheet_name="Validated Keys", index=False)
-
+        hourly_weather_df = pd.concat(sheets["hourly_weather"], ignore_index=True) if sheets["hourly_weather"] else pd.DataFrame()
+        if not hourly_weather_df.empty:
+                hourly_weather_df.to_excel(writer, sheet_name="Hourly Weather", index=False)
+    
     output.seek(0)
     excel_path = f"{dropbox_folder_path}/{EXCEL_FILENAME}"
     dbx.files_upload(output.read(), excel_path, mode=dropbox.files.WriteMode.overwrite)
