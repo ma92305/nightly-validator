@@ -557,7 +557,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
         meds_df_all = pd.DataFrame(meds_rows)
         # map name -> order index (some meds may not exist in order_idx; default large)
         meds_df_all["med_order"] = meds_df_all["medication"].map(lambda n: order_idx.get(n, idx+1000))
-        meds_df_all = meds_df_all.sort_values(["med_order", "date"], ascending=[True, False]).reset_index(drop=True)
+        meds_df_all = meds_df_all.sort_values(["date", "med_order"], ascending=[False, True])
         meds_df_all = meds_df_all.drop(columns=["med_order"])
     else:
         meds_df_all = pd.DataFrame(columns=["File", "date", "time taken", "medication", "status", "dose", "emoji"])
