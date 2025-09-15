@@ -78,7 +78,7 @@ def dropbox_write_json(filename, data):
     """Write JSON file to Dropbox HealthLogs folder"""
     path = f"{DROPBOX_FOLDER}/{filename}"
     dbx.files_upload(
-        json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"),
+        json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode("utf-8"),
         path,
         mode=WriteMode.overwrite
     )
