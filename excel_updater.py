@@ -313,7 +313,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
                     df_events["File"] = filename
                     sheets["symptom_events"].append(df_events.sort_values("time", ascending=False))
 
-        # --- CONDITIONS & ACTIVITIES ---
+        # --- CONDITIONS & ACTIVITIES (Locations) ---
         if val_dict.get("conditions_valid", False):
                 cond_entries = clean_entries(
                         data.get("condition_entries", []),
@@ -327,40 +327,29 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
                                 df_cond["category"] = ""
                         df_cond["category"] = df_cond["category"].astype(str).str.lower()
 
-                        # Activities
+                        # Activities / Locations
                         df_activities = df_cond[df_cond["category"] == "activities"].copy()
                         if not df_activities.empty:
-                                df_activities = df_activities.drop(columns=["category"], errors="ignore")
+                                # drop only the quantity column
+                                df_activities = df_activities.drop(columns=["quantity"], errors="ignore")
                                 sheets["activities"].append(df_activities.sort_values("time", ascending=False))
-
-                        # Conditions (exclude stairs/standing/walking)
-                        df_conditions = df_cond[
-                                (df_cond["category"] == "conditions") &
-                                (~df_cond["item"].str.lower().isin(["stairs", "🧍prolonged standing", "walking"]))
-                        ].copy()
-
-                        if not df_conditions.empty:
-                                # Only keep the columns you actually want
-                                cols_to_keep = [c for c in df_conditions.columns if c not in ["status", "quantity", "category"]]
-                                df_conditions = df_conditions[cols_to_keep]
-                                sheets["conditions"].append(df_conditions.sort_values("time", ascending=False))
 
                         # Stairs
                         df_stairs = df_cond[df_cond["item"].str.lower() == "stairs"].copy()
                         if not df_stairs.empty:
-                                df_stairs = df_stairs.drop(columns=["status","category"], errors="ignore")
+                                df_stairs = df_stairs.drop(columns=["quantity"], errors="ignore")
                                 sheets["stairs"].append(df_stairs.sort_values("time", ascending=False))
 
                         # Prolonged standing
                         df_standing = df_cond[df_cond["item"].str.lower() == "🧍prolonged standing"].copy()
                         if not df_standing.empty:
-                                df_standing = df_standing.drop(columns=["status","category"], errors="ignore")
+                                df_standing = df_standing.drop(columns=["quantity"], errors="ignore")
                                 sheets["standing"].append(df_standing.sort_values("time", ascending=False))
 
                         # Walking
                         df_walking = df_cond[df_cond["item"].str.lower() == "walking"].copy()
                         if not df_walking.empty:
-                                df_walking = df_walking.drop(columns=["status","category"], errors="ignore")
+                                df_walking = df_walking.drop(columns=["quantity"], errors="ignore")
                                 sheets["walking"].append(df_walking.sort_values("time", ascending=False))
 
         # --- NUTRITION ---
