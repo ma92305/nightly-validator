@@ -189,31 +189,46 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
 
         file_date = pd.to_datetime(date_str, errors="coerce").date()
 
-        # --- HR & Tachy ---
+        # --- HR & Tachy Events ---
         hr = data.get("heartrate_entries", {})
         if isinstance(hr, list):
-            hr = hr[0] if hr else {}
+                hr = hr[0] if hr else {}
+
+        # Append HR stats as before
         sheets["hr_stats"].append({
-            "File": filename,
-            "HR_max": hr.get("HR_max"),
-            "HR_avg": hr.get("HR_avg"),
-            "HR_min": hr.get("HR_min"),
-            "tachy_percent": hr.get("tachy_percent"),
-            "HRV": hr.get("HRV"),
-            "date": file_date,
+                "File": filename,
+                "HR_max": hr.get("HR_max"),
+                "HR_avg": hr.get("HR_avg"),
+                "HR_min": hr.get("HR_min"),
+                "tachy_percent": hr.get("tachy_percent"),
+                "HRV": hr.get("HRV"),
+                "date": file_date,
         })
+
+        # --- Tachy Events ---
         tachy_dict = parse_tachy_events(hr.get("tachy_events", {}))
         if any(len(v) > 0 for v in tachy_dict.values()):
-            try:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", category=UserWarning)
-                    tachy_df = pd.DataFrame(tachy_dict)
-                    tachy_df["event_start"] = pd.to_datetime(tachy_df.get("event_start"), errors="coerce")
-                    tachy_df["event_end"] = pd.to_datetime(tachy_df.get("event_end"), errors="coerce")
-                tachy_df["File"] = filename
-                sheets["tachy_events"].append(tachy_df)
-            except Exception as e:
-                print(f"⚠️ Failed to create tachy DataFrame for {filename}: {e}")
+                try:
+                        with warnings.catch_warnings():
+                                warnings.simplefilter("ignore", category=UserWarning)
+                                tachy_df = pd.DataFrame(tachy_dict)
+
+                                # Parse datetime columns
+                                tachy_df["event_start"] = pd.to_datetime(tachy_df.get("event_start"), errors="coerce")
+                                tachy_df["event_end"] = pd.to_datetime(tachy_df.get("event_end"), errors="coerce")
+
+                        # Add file info and the date column
+                        tachy_df["File"] = filename
+                        tachy_df["date"] = file_date
+
+                        # Optional: sort events within the day by start time
+                        if "event_start" in tachy_df.columns:
+                                tachy_df = tachy_df.sort_values("event_start", ascending=True, na_position="last")
+
+                        sheets["tachy_events"].append(tachy_df)
+
+                except Exception as e:
+                        print(f"⚠️ Failed to create tachy DataFrame for {filename}: {e}")
 
         # --- Sleep & Weather ---
         sleep = data.get("sleep_entries", {})
