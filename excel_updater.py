@@ -624,7 +624,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
             # time taken: use entry time if present
             time_taken = ""
             if picked_entry:
-                t = picked_entry.get("time")
+                t = picked_entry.get("time") or picked_entry.get("time_taken")
                 if t:
                     # try to normalize to ISO-ish string; if parse fails, keep original
                     try:
