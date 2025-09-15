@@ -198,17 +198,28 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
         # --- HR & Tachy Events ---
         hr = data.get("heartrate_entries", {})
         if isinstance(hr, list):
-                hr = hr[0] if hr else {}
+            hr = hr[0] if hr else {}
 
-        # Append HR stats as before
+        hr_max = hr.get("HR_max")
+        tachy_percent = hr.get("tachy_percent")
+
+        # Apply rule: if HR_max < 100 and tachy_percent is blank, set to 0
+        try:
+            hr_max_val = float(hr_max)
+        except (TypeError, ValueError):
+            hr_max_val = None
+
+        if (hr_max_val is not None) and hr_max_val < 100 and (tachy_percent in [None, ""]):
+            tachy_percent = 0
+
         sheets["hr_stats"].append({
-                "File": filename,
-                "HR_max": hr.get("HR_max"),
-                "HR_avg": hr.get("HR_avg"),
-                "HR_min": hr.get("HR_min"),
-                "tachy_percent": hr.get("tachy_percent"),
-                "HRV": hr.get("HRV"),
-                "date": file_date,
+            "File": filename,
+            "HR_max": hr_max,
+            "HR_avg": hr.get("HR_avg"),
+            "HR_min": hr.get("HR_min"),
+            "tachy_percent": tachy_percent,
+            "HRV": hr.get("HRV"),
+            "date": file_date,
         })
 
         # --- Tachy Events ---
