@@ -580,6 +580,12 @@ def standardize_time(df, time_col="time", add_hour=True):
             df["hour"] = df[time_col].dt.hour
     return df
 
+# --- Concatenate lists of DataFrames ---
+def concat_or_empty(lst):
+    if not lst:
+        return pd.DataFrame()
+    return pd.concat(lst, ignore_index=True)
+
 # --- Standardize per-sheet ---
 symptoms_df_all = standardize_time(symptoms_df_all)
 symptom_events_df_all = standardize_time(symptom_events_df_all)
