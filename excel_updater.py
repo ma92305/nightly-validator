@@ -361,9 +361,10 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
                 meals_df = df_nutri[df_nutri["item"].astype(str).str.contains("🍽️")].sort_values("time", ascending=False)
                 liquids_df = df_nutri[df_nutri["item"].astype(str).str.contains("💧")].sort_values("time", ascending=False)
                 general_df = df_nutri[~df_nutri["item"].astype(str).str.contains("🍽️|💧")].sort_values("time", ascending=False)
+                general_df = general_df.drop(columns=["amount"], errors="ignore")
+                sheets["nutrition_general"].append(general_df)
                 sheets["nutrition_meals"].append(meals_df)
                 sheets["nutrition_liquids"].append(liquids_df)
-                sheets["nutrition_general"].append(general_df)
 
                 if not liquids_df.empty and "amount" in liquids_df.columns:
                     liquids_df["amount_num"] = liquids_df["amount"].apply(map_amount_to_number)
