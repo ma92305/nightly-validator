@@ -349,15 +349,14 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
     daily_meals_df = concat_or_empty(sheets["daily_meals"])
     validated_keys_df = pd.DataFrame(sheets["validated_flags"]).fillna(False)
 
-    if "filename" in validated_keys_df.columns:
+    if "File" in validated_keys_df.columns:
         # Extract the yyyy-MM-dd part and parse to datetime
         validated_keys_df["date"] = (
-            validated_keys_df["filename"]
+            validated_keys_df["File"]
             .str.extract(r"health_log_(\d{4}-\d{2}-\d{2})")[0]
             .apply(pd.to_datetime, errors="coerce")
         )
-    
-        validated_keys_df = validated_keys_df.sort_values("date", ascending=True).reset_index(drop=True)
+        validated_keys_df = validated_keys_df.sort_values("date", ascending=False).reset_index(drop=True)
 
     # --------------------------
     # Replace existing meds_df_all line with this block
