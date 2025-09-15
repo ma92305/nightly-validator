@@ -327,26 +327,25 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
                                 df_cond["category"] = ""
                         df_cond["category"] = df_cond["category"].astype(str).str.lower()
 
-                        # Activities / Locations
+                        # Activities / Locations (keep status, drop quantity)
                         df_activities = df_cond[df_cond["category"] == "activities"].copy()
                         if not df_activities.empty:
-                                # drop only the quantity column
                                 df_activities = df_activities.drop(columns=["quantity"], errors="ignore")
                                 sheets["activities"].append(df_activities.sort_values("time", ascending=False))
 
-                        # Stairs
+                        # Stairs (keep quantity, drop status)
                         df_stairs = df_cond[df_cond["item"].str.lower() == "stairs"].copy()
                         if not df_stairs.empty:
-                                df_stairs = df_stairs.drop(columns=["quantity"], errors="ignore")
+                                df_stairs = df_stairs.drop(columns=["status"], errors="ignore")
                                 sheets["stairs"].append(df_stairs.sort_values("time", ascending=False))
 
-                        # Prolonged standing
+                        # Prolonged standing (keep status, drop quantity)
                         df_standing = df_cond[df_cond["item"].str.lower() == "🧍prolonged standing"].copy()
                         if not df_standing.empty:
                                 df_standing = df_standing.drop(columns=["quantity"], errors="ignore")
                                 sheets["standing"].append(df_standing.sort_values("time", ascending=False))
 
-                        # Walking
+                        # Walking (keep status, drop quantity)
                         df_walking = df_cond[df_cond["item"].str.lower() == "walking"].copy()
                         if not df_walking.empty:
                                 df_walking = df_walking.drop(columns=["quantity"], errors="ignore")
