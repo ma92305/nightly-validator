@@ -33,22 +33,49 @@ def clean_entries(entries, required_fields=None):
         cleaned.append(entry)
     return cleaned
 
-def parse_tachy_events(tachy_events_input):
-    events = {k: [] for k in ["event_start_epoch", "event_end_epoch", "event_start", "event_end", "duration_seconds", "max_bpm"]}
-    if not tachy_events_input:
+def parse_tachy_events(tachy_input):
+    """
+    Parses tachy events from the JSON file.
+    Accepts:
+      - dict with lists under keys
+      - string with JSON lines
+      - empty or None
+    Returns a dict of lists with standardized keys.
+    """
+    keys = ["event_start_epoch", "event_end_epoch", "event_start", "event_end", "duration_seconds", "max_bpm"]
+    events = {k: [] for k in keys}
+
+    if not tachy_input:
         return events
+
     try:
-        if isinstance(tachy_events_input, dict):
-            for k in events.keys():
-                events[k].extend(tachy_events_input.get(k, []))
-        elif isinstance(tachy_events_input, str):
-            for line in tachy_events_input.strip().splitlines():
-                if line.strip():
+        if isinstance(tachy_input, dict):
+            for k in keys:
+                val = tachy_input.get(k, [])
+                if isinstance(val, list):
+                    events[k].extend(val)
+                else:
+                    # sometimes might be a single value
+                    events[k].append(val)
+        elif isinstance(tachy_input, str):
+            # assume multiple JSON lines
+            for line in tachy_input.strip().splitlines():
+                if not line.strip():
+                    continue
+                try:
                     d = json.loads(line)
-                    for k in events.keys():
-                        events[k].extend(d.get(k, []))
-    except Exception:
-        pass
+                    if isinstance(d, dict):
+                        for k in keys:
+                            val = d.get(k, [])
+                            if isinstance(val, list):
+                                events[k].extend(val)
+                            else:
+                                events[k].append(val)
+                except json.JSONDecodeError:
+                    continue
+    except Exception as e:
+        print("⚠️ Error parsing tachy events:", e)
+
     return events
 
 def extract_weather_stats(weather_entries):
@@ -177,13 +204,16 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
         })
         tachy_dict = parse_tachy_events(hr.get("tachy_events", {}))
         if any(len(v) > 0 for v in tachy_dict.values()):
-            tachy_df = pd.DataFrame(tachy_dict)
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", category=UserWarning)
-                tachy_df["event_start"] = pd.to_datetime(tachy_df.get("event_start"), errors='coerce')
-                tachy_df["event_end"] = pd.to_datetime(tachy_df.get("event_end"), errors='coerce')
-            tachy_df["File"] = filename
-            sheets["tachy_events"].append(tachy_df)
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", category=UserWarning)
+                    tachy_df = pd.DataFrame(tachy_dict)
+                    tachy_df["event_start"] = pd.to_datetime(tachy_df.get("event_start"), errors="coerce")
+                    tachy_df["event_end"] = pd.to_datetime(tachy_df.get("event_end"), errors="coerce")
+                tachy_df["File"] = filename
+                sheets["tachy_events"].append(tachy_df)
+            except Exception as e:
+                print(f"⚠️ Failed to create tachy DataFrame for {filename}: {e}")
 
         # --- Sleep & Weather ---
         sleep = data.get("sleep_entries", {})
