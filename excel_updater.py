@@ -34,15 +34,6 @@ def clean_entries(entries, required_fields=None):
     return cleaned
 
 def parse_tachy_events(tachy_input):
-    """
-    Parses tachy events from the JSON file.
-    Accepts:
-      - dict with lists under keys
-      - dict with single values under keys
-      - string with JSON lines
-      - empty or None
-    Returns a dict of lists with standardized keys.
-    """
     keys = ["event_start_epoch", "event_end_epoch", "event_start", "event_end", "duration_seconds", "max_bpm"]
     events = {k: [] for k in keys}
 
@@ -50,18 +41,29 @@ def parse_tachy_events(tachy_input):
         return events
 
     try:
-        if isinstance(tachy_input, dict):
-            # For each key, ensure it's always a list
+        if isinstance(tachy_input, list):
+            # Correct: your JSON is a list of dicts
+            for entry in tachy_input:
+                if not isinstance(entry, dict):
+                    continue
+                for k in keys:
+                    val = entry.get(k)
+                    if val is None:
+                        continue
+                    # unwrap single-item lists
+                    if isinstance(val, list) and len(val) == 1:
+                        val = val[0]
+                    events[k].append(val)
+        elif isinstance(tachy_input, dict):
             for k in keys:
                 val = tachy_input.get(k)
                 if val is None:
                     continue
                 if isinstance(val, list):
-                    events[k].extend(val)
+                    events[k].extend([v[0] if isinstance(v, list) and len(v)==1 else v for v in val])
                 else:
                     events[k].append(val)
         elif isinstance(tachy_input, str):
-            # Assume multiple JSON lines
             for line in tachy_input.strip().splitlines():
                 if not line.strip():
                     continue
@@ -72,20 +74,16 @@ def parse_tachy_events(tachy_input):
                             val = d.get(k)
                             if val is None:
                                 continue
-                            if isinstance(val, list):
-                                events[k].extend(val)
-                            else:
-                                events[k].append(val)
+                            if isinstance(val, list) and len(val) == 1:
+                                val = val[0]
+                            events[k].append(val)
                 except json.JSONDecodeError:
                     continue
-        else:
-            # unexpected type, try wrapping in a list if possible
-            events[keys[0]].append(tachy_input)
     except Exception as e:
         print("⚠️ Error parsing tachy events:", e)
 
     return events
-
+    
 def extract_weather_stats(weather_entries):
     temperature = weather_entries.get("temperature", {})
     humidity = weather_entries.get("humidity", {})
