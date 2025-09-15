@@ -38,6 +38,7 @@ def parse_tachy_events(tachy_input):
     Parses tachy events from the JSON file.
     Accepts:
       - dict with lists under keys
+      - dict with single values under keys
       - string with JSON lines
       - empty or None
     Returns a dict of lists with standardized keys.
@@ -50,15 +51,17 @@ def parse_tachy_events(tachy_input):
 
     try:
         if isinstance(tachy_input, dict):
+            # For each key, ensure it's always a list
             for k in keys:
-                val = tachy_input.get(k, [])
+                val = tachy_input.get(k)
+                if val is None:
+                    continue
                 if isinstance(val, list):
                     events[k].extend(val)
                 else:
-                    # sometimes might be a single value
                     events[k].append(val)
         elif isinstance(tachy_input, str):
-            # assume multiple JSON lines
+            # Assume multiple JSON lines
             for line in tachy_input.strip().splitlines():
                 if not line.strip():
                     continue
@@ -66,13 +69,18 @@ def parse_tachy_events(tachy_input):
                     d = json.loads(line)
                     if isinstance(d, dict):
                         for k in keys:
-                            val = d.get(k, [])
+                            val = d.get(k)
+                            if val is None:
+                                continue
                             if isinstance(val, list):
                                 events[k].extend(val)
                             else:
                                 events[k].append(val)
                 except json.JSONDecodeError:
                     continue
+        else:
+            # unexpected type, try wrapping in a list if possible
+            events[keys[0]].append(tachy_input)
     except Exception as e:
         print("⚠️ Error parsing tachy events:", e)
 
