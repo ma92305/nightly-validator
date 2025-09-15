@@ -580,7 +580,9 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
         weather_stats_df.to_excel(writer, sheet_name="Weather Stats", index=False)
         hourly_weather_df = pd.concat(sheets["hourly_weather"], ignore_index=True) if sheets["hourly_weather"] else pd.DataFrame()
         if not hourly_weather_df.empty:
-                hourly_weather_df.to_excel(writer, sheet_name="Hourly Weather", index=False)
+            # Sort by date (newest first) and then by hour
+            hourly_weather_df = hourly_weather_df.sort_values(["Date", "Hour"], ascending=[False, True])
+            hourly_weather_df.to_excel(writer, sheet_name="Hourly Weather", index=False)
         symptoms_df_all.to_excel(writer, sheet_name="Symptoms", index=False)
         if not symptom_events_df_all.empty:
             startrow_events = len(symptoms_df_all) + 3
