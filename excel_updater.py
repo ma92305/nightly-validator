@@ -329,6 +329,337 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
             return df.sort_values("date", ascending=False, na_position="last")
         return df
 
+import json
+import pandas as pd
+import warnings
+from io import BytesIO
+import dropbox
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+EXCEL_FILENAME = "combined_data.xlsx"
+
+quantity_map = {
+    "a little": 1,
+    "some": 2,
+    "moderate": 3,
+    "a lot": 4
+}
+
+def map_amount_to_number(amount_str):
+    if not isinstance(amount_str, str):
+        return 0
+    return quantity_map.get(amount_str.strip().lower(), 0)
+
+def clean_entries(entries, required_fields=None):
+    cleaned = []
+    for entry in entries:
+        if isinstance(entry, str):
+            entry = {"item": entry}
+        if not isinstance(entry, dict):
+            continue
+        if required_fields and any(field not in entry or not entry.get(field) for field in required_fields):
+            continue
+        if all(v in [None, "", [], {}] for v in entry.values()):
+            continue
+        cleaned.append(entry)
+    return cleaned
+
+def parse_tachy_events(tachy_events_input):
+    events = {k: [] for k in ["event_start_epoch", "event_end_epoch", "event_start", "event_end", "duration_seconds", "max_bpm"]}
+    if not tachy_events_input:
+        return events
+    try:
+        if isinstance(tachy_events_input, dict):
+            for k in events.keys():
+                events[k].extend(tachy_events_input.get(k, []))
+        elif isinstance(tachy_events_input, str):
+            for line in tachy_events_input.strip().splitlines():
+                if line.strip():
+                    d = json.loads(line)
+                    for k in events.keys():
+                        events[k].extend(d.get(k, []))
+    except Exception:
+        pass
+    return events
+
+def extract_weather_stats(weather_entries):
+    temperature = weather_entries.get("temperature", {})
+    humidity = weather_entries.get("humidity", {})
+    pressure = weather_entries.get("pressure", {})
+    precipitation = weather_entries.get("precipitation", {})
+    return {
+        "temp_high": temperature.get("temp_high"),
+        "temp_low": temperature.get("temp_low"),
+        "temp_avg": temperature.get("temp_avg"),
+        "humidity_avg": humidity.get("humidity_avg"),
+        "pressure_avg": pressure.get("pressure_avg"),
+        "pressure_min": pressure.get("pressure_min"),
+        "pressure_max": pressure.get("pressure_max"),
+        "precipitation_hours": precipitation.get("precipitation_hours"),
+        "precipitation_total": precipitation.get("precipitation_total"),
+    }
+
+def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_rebuild=False):
+    """
+    Full incremental Excel builder with:
+    - Parallel JSON loading
+    - DataFrame caching for speed
+    - All sheets included (HR, Sleep, Weather, Symptoms, Meds, Nutrition, Digestion, Conditions, Activities, Stairs, Standing, Walking, Validated Keys)
+    """
+
+    cache_file = f"{dropbox_folder_path}/combined_cache.json"
+
+    # --- Load existing cache ---
+    try:
+        md, res = dbx.files_download(cache_file)
+        cache = json.loads(res.content.decode("utf-8"))
+    except Exception:
+        cache = {"logs": {}}
+
+    updated = False
+
+    # --- List all health log files ---
+    try:
+        res = dbx.files_list_folder(dropbox_folder_path)
+    except Exception as e:
+        print("Dropbox folder error:", e)
+        return
+
+    logs_to_process = []
+    for entry in res.entries:
+        if not entry.name.startswith("health_log_") or not entry.name.endswith(".txt"):
+            continue
+        date_str = entry.name.replace("health_log_", "").replace(".txt", "")
+        last_mod = entry.server_modified.isoformat()
+        cached = cache["logs"].get(date_str)
+        if cached and cached.get("last_modified") == last_mod:
+            continue
+        logs_to_process.append((entry.path_lower, entry.name, date_str, last_mod))
+
+    if not logs_to_process and cache["logs"] and not force_rebuild:
+        print("⚡ No new/changed logs. Skipping Excel rebuild.")
+        return
+
+    # --- Parallel download & parse ---
+    def fetch_log(entry_path, filename, date_str, last_mod):
+        try:
+            _, f = dbx.files_download(entry_path)
+            data = json.loads(f.content.decode("utf-8"))
+            return date_str, {"data": data, "last_modified": last_mod, "filename": filename}
+        except Exception as e:
+            print(f"Failed to read {filename}:", e)
+            return None
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(fetch_log, *args) for args in logs_to_process]
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                date_str, log_data = result
+                cache["logs"][date_str] = log_data
+                updated = True
+
+    if updated:
+        dbx.files_upload(
+            json.dumps(cache, ensure_ascii=False, indent=2).encode("utf-8"),
+            cache_file,
+            mode=dropbox.files.WriteMode.overwrite,
+        )
+
+    # --- Containers for all sheets ---
+    sheets = {
+        "hr_stats": [], "tachy_events": [], "sleep": [], "weather": [],
+        "symptoms": [], "symptom_events": [], "conditions": [], "activities": [],
+        "stairs": [], "standing": [], "walking": [],
+        "nutrition_general": [], "nutrition_meals": [], "nutrition_liquids": [],
+        "digestion": [], "meds": [], "daily_liquids": [], "daily_meals": [],
+        "validated_flags": [],
+        "hourly_weather": []   # <--- add this line
+    }
+
+    # --- Process cached logs ---
+    for date_str, payload in cache["logs"].items():
+        data = payload["data"]
+        filename = payload["filename"]
+        validated = data.get("validated_entries", {})
+        val_dict = validated[0] if isinstance(validated, list) and validated else validated
+        val_dict = {k: str(v).lower() == "true" for k, v in val_dict.items()} if isinstance(val_dict, dict) else {}
+
+        # Validated flags
+        row_flags = {"File": filename}
+        for k, v in val_dict.items():
+            row_flags[k] = bool(v)
+        sheets["validated_flags"].append(row_flags)
+
+        file_date = pd.to_datetime(date_str, errors="coerce").date()
+
+        # --- HR & Tachy ---
+        hr = data.get("heartrate_entries", {})
+        if isinstance(hr, list):
+            hr = hr[0] if hr else {}
+        sheets["hr_stats"].append({
+            "File": filename,
+            "HR_max": hr.get("HR_max"),
+            "HR_avg": hr.get("HR_avg"),
+            "HR_min": hr.get("HR_min"),
+            "tachy_percent": hr.get("tachy_percent"),
+            "HRV": hr.get("HRV"),
+            "date": file_date,
+        })
+        tachy_dict = parse_tachy_events(hr.get("tachy_events", {}))
+        if any(len(v) > 0 for v in tachy_dict.values()):
+            tachy_df = pd.DataFrame(tachy_dict)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=UserWarning)
+                tachy_df["event_start"] = pd.to_datetime(tachy_df.get("event_start"), errors='coerce')
+                tachy_df["event_end"] = pd.to_datetime(tachy_df.get("event_end"), errors='coerce')
+            tachy_df["File"] = filename
+            sheets["tachy_events"].append(tachy_df)
+
+        # --- Sleep & Weather ---
+        sleep = data.get("sleep_entries", {})
+        sleep_date = pd.to_datetime(sleep.get("bedtime"), errors='coerce').date() if sleep.get("bedtime") else file_date
+        sheets["sleep"].append({
+            "File": filename,
+            "date": sleep_date,
+            "duration": sleep.get("asleep_time"),
+            "score": sleep.get("sleep_score"),
+            "bedtime": sleep.get("bedtime"),
+            "waketime": sleep.get("waketime"),
+            "rem_time": sleep.get("rem_time"),
+            "core_time": sleep.get("core_time"),
+            "deep_time": sleep.get("deep_time"),
+            "awake_time": sleep.get("awake_time"),
+        })
+        weather = data.get("weather_entries", {})
+        if weather:
+            stats = extract_weather_stats(weather)
+            stats["File"] = filename
+            stats["date"] = sleep_date
+            sheets["weather"].append(stats)
+
+        # --- HOURLY WEATHER ---
+        hourly_data = weather.get("hourly", [])
+        if hourly_data:
+                df_hourly = pd.DataFrame(hourly_data)
+                df_hourly['time'] = pd.to_datetime(df_hourly['time'])
+                df_hourly['date'] = df_hourly['time'].dt.date
+                df_hourly['Hour'] = df_hourly['time'].dt.hour
+                df_hourly['pressure'] = pd.to_numeric(df_hourly['pressure'], errors='coerce')
+
+                # Calculate cumulative pressure change over 6 hours
+                df_hourly['Pressure Change (inHg)'] = df_hourly['pressure'].diff(periods=6).fillna(0)
+
+                # Flag rapid changes
+                df_hourly['Pressure Trend'] = df_hourly['Pressure Change (inHg)'].apply(
+                        lambda x: 'Rapid Rise' if x > 0.09 else ('Rapid Fall' if x < -0.09 else 'Stable')
+                )
+
+                # Flag low pressure
+                df_hourly['Low Pressure Flag'] = df_hourly['pressure'].apply(lambda x: 'Yes' if x <= 30.00 else 'No')
+
+                df_hourly['File'] = filename
+                sheets["hourly_weather"].append(df_hourly)
+        
+        # --- SYMPTOMS ---
+        if val_dict.get("symptoms_valid", False):
+            symptoms = clean_entries(data.get("symptom_entries", []), required_fields=["item", "time"])
+            if symptoms:
+                df_symp = pd.DataFrame(symptoms)
+                if "category" not in df_symp.columns:
+                    df_symp["category"] = ""
+                df_symp["category"] = df_symp["category"].astype(str).str.lower()
+                df_events = df_symp[df_symp["category"] == "event"].copy()
+                df_regular = df_symp[df_symp["category"] != "event"].copy()
+                if not df_regular.empty:
+                    df_regular = df_regular.drop(columns=["category"], errors="ignore")
+                    df_regular["time"] = pd.to_datetime(df_regular["time"], errors='coerce')
+                    df_regular["File"] = filename
+                    sheets["symptoms"].append(df_regular.sort_values("time", ascending=False))
+                if not df_events.empty:
+                    df_events = df_events[["item", "time"]].copy()
+                    df_events["time"] = pd.to_datetime(df_events["time"], errors='coerce')
+                    df_events["File"] = filename
+                    sheets["symptom_events"].append(df_events.sort_values("time", ascending=False))
+
+        # --- CONDITIONS & ACTIVITIES ---
+        if val_dict.get("conditions_valid", False):
+            cond_entries = clean_entries(data.get("condition_entries", []), required_fields=["item","time"])
+            if cond_entries:
+                df_cond = pd.DataFrame(cond_entries)
+                df_cond["time"] = pd.to_datetime(df_cond["time"], errors='coerce')
+                df_cond["File"] = filename
+                if "category" not in df_cond.columns:
+                    df_cond["category"] = ""
+                df_cond["category"] = df_cond["category"].astype(str).str.lower()
+                df_activities = df_cond[df_cond["category"] == "activities"].copy()
+                df_conditions = df_cond[df_cond["category"] == "conditions"].copy()
+                if not df_activities.empty:
+                    df_activities = df_activities.drop(columns=["category"], errors="ignore")
+                    sheets["activities"].append(df_activities.sort_values("time", ascending=False))
+                if not df_conditions.empty:
+                    df_conditions = df_conditions.drop(columns=["category"], errors="ignore")
+                    sheets["conditions"].append(df_conditions.sort_values("time", ascending=False))
+                sheets["stairs"].append(df_cond[df_cond["item"].str.lower() == "stairs"].drop(columns=["status","category"], errors="ignore").sort_values("time", ascending=False))
+                sheets["standing"].append(df_cond[df_cond["item"].str.lower() == "🧍prolonged standing"].drop(columns=["status","category"], errors="ignore").sort_values("time", ascending=False))
+                sheets["walking"].append(df_cond[df_cond["item"].str.lower() == "walking"].drop(columns=["status","category"], errors="ignore").sort_values("time", ascending=False))
+
+        # --- NUTRITION ---
+        if val_dict.get("nutrition_valid", False):
+            nutrition = clean_entries(data.get("nutrition_entries", []), required_fields=["item","time"])
+            if nutrition:
+                df_nutri = pd.DataFrame(nutrition).drop(columns=["category"], errors="ignore")
+                df_nutri["time"] = pd.to_datetime(df_nutri["time"], errors='coerce')
+                df_nutri["File"] = filename
+                meals_df = df_nutri[df_nutri["item"].astype(str).str.contains("🍽️")].sort_values("time", ascending=False)
+                liquids_df = df_nutri[df_nutri["item"].astype(str).str.contains("💧")].sort_values("time", ascending=False)
+                general_df = df_nutri[~df_nutri["item"].astype(str).str.contains("🍽️|💧")].sort_values("time", ascending=False)
+                sheets["nutrition_meals"].append(meals_df)
+                sheets["nutrition_liquids"].append(liquids_df)
+                sheets["nutrition_general"].append(general_df)
+
+                if not liquids_df.empty and "amount" in liquids_df.columns:
+                    liquids_df["amount_num"] = liquids_df["amount"].apply(map_amount_to_number)
+                    liquids_df["date"] = liquids_df["time"].dt.date
+                    daily_liquids = liquids_df.groupby("date")["amount_num"].sum().reset_index().rename(columns={"amount_num":"daily_total_liquid"})
+                    sheets["daily_liquids"].append(daily_liquids)
+
+                if not meals_df.empty and "amount" in meals_df.columns:
+                    meals_df["amount_num"] = meals_df["amount"].apply(map_amount_to_number)
+                    meals_df["date"] = meals_df["time"].dt.date
+                    daily_meals = meals_df.groupby("date")["amount_num"].sum().reset_index().rename(columns={"amount_num":"daily_total_meals"})
+                    sheets["daily_meals"].append(daily_meals)
+
+        # --- DIGESTION ---
+        if val_dict.get("digestion_valid", False):
+            digestion = clean_entries(data.get("digestion_entries", []), required_fields=["item","time"])
+            if digestion:
+                df_dig = pd.DataFrame(digestion).drop(columns=["category"], errors="ignore")
+                df_dig["time"] = pd.to_datetime(df_dig["time"], errors='coerce')
+                df_dig["File"] = filename
+                sheets["digestion"].append(df_dig.sort_values("time", ascending=False))
+
+        # --- MEDS ---
+        if val_dict.get("med_valid", False):
+            meds = data.get("med_entries", [])
+            med_list = [m for m in meds if isinstance(m, dict) and all(k in m for k in ["name","dose","time"])]
+            if med_list:
+                df_meds = pd.DataFrame(med_list)[["name","dose","time"]]
+                df_meds["time"] = pd.to_datetime(df_meds["time"], errors='coerce')
+                df_meds["File"] = filename
+                sheets["meds"].append(df_meds.sort_values("time", ascending=False))
+
+    # --- Helper: concat and sort ---
+    def concat_or_empty(lst):
+        if not lst:
+            return pd.DataFrame()
+        df = pd.concat(lst, ignore_index=True)
+        if "time" in df.columns:
+            return df.sort_values("time", ascending=False, na_position="last")
+        elif "date" in df.columns:
+            return df.sort_values("date", ascending=False, na_position="last")
+        return df
+
     # --- Combine DataFrames ---
     hr_stats_df = pd.DataFrame(sheets["hr_stats"]).sort_values("date", ascending=False, na_position="last")
     tachy_df_all = concat_or_empty(sheets["tachy_events"])
