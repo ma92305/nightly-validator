@@ -68,7 +68,7 @@ def extract_weather_stats(weather_entries):
         "precipitation_total": precipitation.get("precipitation_total"),
     }
 
-def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5):
+def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_rebuild=False):
     """
     Full incremental Excel builder with:
     - Parallel JSON loading
@@ -105,7 +105,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5):
             continue
         logs_to_process.append((entry.path_lower, entry.name, date_str, last_mod))
 
-    if not logs_to_process and cache["logs"]:
+    if not logs_to_process and cache["logs"] and not force_rebuild:
         print("⚡ No new/changed logs. Skipping Excel rebuild.")
         return
 
