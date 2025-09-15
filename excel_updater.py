@@ -315,25 +315,50 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
 
         # --- CONDITIONS & ACTIVITIES ---
         if val_dict.get("conditions_valid", False):
-            cond_entries = clean_entries(data.get("condition_entries", []), required_fields=["item","time"])
-            if cond_entries:
-                df_cond = pd.DataFrame(cond_entries)
-                df_cond["time"] = pd.to_datetime(df_cond["time"], errors='coerce')
-                df_cond["File"] = filename
-                if "category" not in df_cond.columns:
-                    df_cond["category"] = ""
-                df_cond["category"] = df_cond["category"].astype(str).str.lower()
-                df_activities = df_cond[df_cond["category"] == "activities"].copy()
-                df_conditions = df_cond[df_cond["category"] == "conditions"].copy()
-                if not df_activities.empty:
-                    df_activities = df_activities.drop(columns=["category"], errors="ignore")
-                    sheets["activities"].append(df_activities.sort_values("time", ascending=False))
-                if not df_conditions.empty:
-                    df_conditions = df_conditions.drop(columns=["category"], errors="ignore")
-                    sheets["conditions"].append(df_conditions.sort_values("time", ascending=False))
-                sheets["stairs"].append(df_cond[df_cond["item"].str.lower() == "stairs"].drop(columns=["status","category"], errors="ignore").sort_values("time", ascending=False))
-                sheets["standing"].append(df_cond[df_cond["item"].str.lower() == "🧍prolonged standing"].drop(columns=["status","category"], errors="ignore").sort_values("time", ascending=False))
-                sheets["walking"].append(df_cond[df_cond["item"].str.lower() == "walking"].drop(columns=["status","category"], errors="ignore").sort_values("time", ascending=False))
+                cond_entries = clean_entries(
+                        data.get("condition_entries", []),
+                        required_fields=["item","time"]
+                )
+                if cond_entries:
+                        df_cond = pd.DataFrame(cond_entries)
+                        df_cond["time"] = pd.to_datetime(df_cond["time"], errors='coerce')
+                        df_cond["File"] = filename
+                        if "category" not in df_cond.columns:
+                                df_cond["category"] = ""
+                        df_cond["category"] = df_cond["category"].astype(str).str.lower()
+
+                        # Activities
+                        df_activities = df_cond[df_cond["category"] == "activities"].copy()
+                        if not df_activities.empty:
+                                df_activities = df_activities.drop(columns=["category"], errors="ignore")
+                                sheets["activities"].append(df_activities.sort_values("time", ascending=False))
+
+                        # Conditions (exclude stairs/standing/walking)
+                        df_conditions = df_cond[
+                                (df_cond["category"] == "conditions") &
+                                (~df_cond["item"].str.lower().isin(["stairs", "🧍prolonged standing", "walking"]))
+                        ].copy()
+                        if not df_conditions.empty:
+                                df_conditions = df_conditions.drop(columns=["category"], errors="ignore")
+                                sheets["conditions"].append(df_conditions.sort_values("time", ascending=False))
+
+                        # Stairs
+                        df_stairs = df_cond[df_cond["item"].str.lower() == "stairs"].copy()
+                        if not df_stairs.empty:
+                                df_stairs = df_stairs.drop(columns=["status","category"], errors="ignore")
+                                sheets["stairs"].append(df_stairs.sort_values("time", ascending=False))
+
+                        # Prolonged standing
+                        df_standing = df_cond[df_cond["item"].str.lower() == "🧍prolonged standing"].copy()
+                        if not df_standing.empty:
+                                df_standing = df_standing.drop(columns=["status","category"], errors="ignore")
+                                sheets["standing"].append(df_standing.sort_values("time", ascending=False))
+
+                        # Walking
+                        df_walking = df_cond[df_cond["item"].str.lower() == "walking"].copy()
+                        if not df_walking.empty:
+                                df_walking = df_walking.drop(columns=["status","category"], errors="ignore")
+                                sheets["walking"].append(df_walking.sort_values("time", ascending=False))
 
         # --- NUTRITION ---
         if val_dict.get("nutrition_valid", False):
