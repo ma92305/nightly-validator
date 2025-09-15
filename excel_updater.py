@@ -345,11 +345,223 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
     nutrition_meals_df = concat_or_empty(sheets["nutrition_meals"])
     nutrition_liquids_df = concat_or_empty(sheets["nutrition_liquids"])
     digestion_df_all = concat_or_empty(sheets["digestion"])
-    meds_df_all = concat_or_empty(sheets["meds"])
     daily_liquids_df = concat_or_empty(sheets["daily_liquids"])
     daily_meals_df = concat_or_empty(sheets["daily_meals"])
     validated_keys_df = pd.DataFrame(sheets["validated_flags"]).fillna(False)
 
+    # --------------------------
+    # Replace existing meds_df_all line with this block
+    # --------------------------
+
+    # Attempt to load all_lists from Dropbox (try common names)
+    all_lists = {}
+    for candidate in ("all_lists.json", "all_lists.txt", "all_lists"):
+        try:
+            md, res = dbx.files_download(f"{dropbox_folder_path}/{candidate}")
+            all_lists = json.loads(res.content.decode("utf-8"))
+            break
+        except Exception:
+            all_lists = {}
+
+    def parse_med_items(raw_list):
+        """
+        raw_list: list of JSON strings or dicts (from your all_lists file)
+        returns list of dicts with keys: name, emoji, dose
+        """
+        out = []
+        if not raw_list:
+            return out
+        for item in raw_list:
+            try:
+                if isinstance(item, str):
+                    parsed = json.loads(item)
+                elif isinstance(item, dict):
+                    parsed = item
+                else:
+                    continue
+                # normalize keys
+                parsed_name = parsed.get("name") or parsed.get("item") or ""
+                out.append({
+                    "name": parsed_name,
+                    "emoji": parsed.get("emoji", ""),
+                    "dose_default": parsed.get("dose", "")
+                })
+            except Exception:
+                continue
+        return out
+
+    # Build master ordered med list: morning -> night -> as_needed
+    morning_list = parse_med_items(all_lists.get("morning_med", []))
+    night_list = parse_med_items(all_lists.get("night_med", []))
+    as_needed_list = parse_med_items(all_lists.get("as_needed_med", []) or all_lists.get("as_needed", []))
+
+    # create unique master order but keep duplicates if present in the lists separately
+    master_order = []
+    order_idx = {}
+    idx = 0
+    for lst, cat in [(morning_list, "morning"), (night_list, "night"), (as_needed_list, "as_needed")]:
+        for med in lst:
+            name = med["name"]
+            if name not in order_idx:
+                order_idx[name] = idx
+                master_order.append({
+                    "name": name,
+                    "emoji": med.get("emoji", ""),
+                    "dose_default": med.get("dose_default", ""),
+                    "category": cat,
+                    "order": idx
+                })
+                idx += 1
+
+    # If some meds appear in files but not in all_lists, we'll add them at the end when discovered
+    # First pass: discover first-taken date per med across ALL cached logs
+    first_taken_date = {}  # med_name -> first date (datetime.date)
+
+    for date_str, payload in cache["logs"].items():
+        # only consider logs where med entries were validated
+        data = payload.get("data", {})
+        validated = data.get("validated_entries", {})
+        val_dict = validated[0] if isinstance(validated, list) and validated else validated
+        med_valid = False
+        if isinstance(val_dict, dict):
+            med_valid = bool(str(val_dict.get("med_valid", val_dict.get("medications_valid", False))).lower() == "true")
+        # fallback: check top-level field "med_valid"
+        if not med_valid:
+            med_valid = bool(str(data.get("med_valid", False)).lower() == "true")
+        if not med_valid:
+            continue
+
+        file_date = pd.to_datetime(date_str, errors="coerce").date()
+        meds_entries = data.get("med_entries", []) or []
+        for m in meds_entries:
+            if not isinstance(m, dict):
+                continue
+            name = m.get("name") or m.get("medication") or ""
+            status = str(m.get("status", "")).strip().lower()
+            if name and status == "taken":
+                existing = first_taken_date.get(name)
+                if existing is None or file_date < existing:
+                    first_taken_date[name] = file_date
+
+    # Also ensure all meds in master_order are in first_taken_date only if they were ever taken;
+    # meds not yet taken will not be added until first_taken_date exists for them.
+
+    # Now build meds rows for every validated file/date
+    meds_rows = []
+    for date_str, payload in cache["logs"].items():
+        data = payload.get("data", {})
+        filename = payload.get("filename", f"health_log_{date_str}.txt")
+        validated = data.get("validated_entries", {})
+        val_dict = validated[0] if isinstance(validated, list) and validated else validated
+        med_valid = False
+        if isinstance(val_dict, dict):
+            med_valid = bool(str(val_dict.get("med_valid", val_dict.get("medications_valid", False))).lower() == "true")
+        if not med_valid:
+            med_valid = bool(str(data.get("med_valid", False)).lower() == "true")
+        if not med_valid:
+            # skip adding meds for this date per your rule
+            continue
+
+        file_date = pd.to_datetime(date_str, errors="coerce").date()
+        meds_entries = data.get("med_entries", []) or []
+        # normalize med entries for quick lookup (case-insensitive)
+        meds_lookup = {}
+        for ent in meds_entries:
+            if not isinstance(ent, dict):
+                continue
+            name = ent.get("name") or ""
+            if not name:
+                continue
+            key = name.strip().lower()
+            meds_lookup.setdefault(key, []).append(ent)
+
+        # For ordering: iterate through master_order; if a med name not present in master_order
+        # but seen as taken in first_taken_date, add to end with next order idx (and category "unknown")
+        # Build dynamic master list that includes discovered meds
+        dynamic_master = list(master_order)  # shallow copy
+        # find discovered meds not in order_idx
+        for med_name in sorted(first_taken_date.keys()):
+            if med_name not in order_idx:
+                order_idx[med_name] = idx
+                dynamic_master.append({
+                    "name": med_name,
+                    "emoji": "",
+                    "dose_default": "",
+                    "category": "unknown",
+                    "order": idx
+                })
+                idx += 1
+
+        # Iterate master list and only include med rows if the med's first_taken_date <= current file_date
+        for med_info in dynamic_master:
+            med_name = med_info["name"]
+            med_key = med_name.strip().lower()
+            med_cat = med_info.get("category", "unknown")
+            # include only if med has a recorded first-taken date and that date <= this file_date
+            first_date = first_taken_date.get(med_name) or first_taken_date.get(med_key)
+            if first_date is None:
+                # never recorded taken anywhere yet -> do not include on any date
+                continue
+            if first_date and file_date < first_date:
+                # this date is before med first taken -> skip
+                continue
+
+            # find entries for this med on this date (could be multiple)
+            entries_for_med = meds_lookup.get(med_key, [])
+            picked_entry = entries_for_med[0] if entries_for_med else None
+
+            # Determine status per rules
+            if med_cat in ("morning", "night"):
+                # morning/night -> taken if present and marked taken, else skipped
+                if picked_entry and str(picked_entry.get("status", "")).strip().lower() == "taken":
+                    status = "taken"
+                else:
+                    status = "skipped"
+            else:
+                # as_needed / unknown -> no data unless present as taken
+                if picked_entry and str(picked_entry.get("status", "")).strip().lower() == "taken":
+                    status = "taken"
+                else:
+                    status = "no data"
+
+            # dose: prefer entry dose, else default from all_lists
+            dose = ""
+            if picked_entry:
+                dose = picked_entry.get("dose") or picked_entry.get("amount") or ""
+            if not dose:
+                dose = med_info.get("dose_default", "") or ""
+
+            # time taken: use entry time if present
+            time_taken = ""
+            if picked_entry:
+                t = picked_entry.get("time")
+                if t:
+                    # try to normalize to ISO-ish string; if parse fails, keep original
+                    try:
+                        time_taken = pd.to_datetime(t).isoformat()
+                    except Exception:
+                        time_taken = str(t)
+
+            meds_rows.append({
+                "File": filename,
+                "date": file_date,
+                "time taken": time_taken,
+                "medication": med_name,
+                "status": status,
+                "dose": dose,
+                "emoji": med_info.get("emoji", "")
+            })
+
+    # Create meds_df_all from meds_rows and sort by master order then date desc
+    if meds_rows:
+        meds_df_all = pd.DataFrame(meds_rows)
+        # map name -> order index (some meds may not exist in order_idx; default large)
+        meds_df_all["med_order"] = meds_df_all["medication"].map(lambda n: order_idx.get(n, idx+1000))
+        meds_df_all = meds_df_all.sort_values(["med_order", "date"], ascending=[True, False]).reset_index(drop=True)
+        meds_df_all = meds_df_all.drop(columns=["med_order"])
+    else:
+        meds_df_all = pd.DataFrame(columns=["File", "date", "time taken", "medication", "status", "dose", "emoji"])
+    
     # --- Export to Excel ---
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
