@@ -611,7 +611,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
         validated_keys_df.to_excel(writer, sheet_name="Validated Keys", index=False)
 
         for sheet_name, worksheet in writer.sheets.items():
-            # Map sheet names to corresponding DataFrames
+            # Map only the sheets that are *actually created as sheets*
             df_map = {
                 "HR Stats": hr_stats_df,
                 "Tachy Events": tachy_df_all,
@@ -619,7 +619,6 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
                 "Weather Stats": weather_stats_df,
                 "Hourly Weather": hourly_weather_df,
                 "Symptoms": symptoms_df_all,
-                "Symptom Events": symptom_events_df_all,
                 "Conditions": conditions_df_all,
                 "Locations": loc_activities_df_all,
                 "Stairs": stairs_df_all,
@@ -631,8 +630,6 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
                 "Digestion": digestion_df_all,
                 "Meds": meds_df_all,
                 "Validated Keys": validated_keys_df,
-                "Daily Liquids": daily_liquids_df,
-                "Daily Meals": daily_meals_df
             }
 
             df = df_map.get(sheet_name)
