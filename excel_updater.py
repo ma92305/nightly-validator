@@ -338,8 +338,11 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
                                 (df_cond["category"] == "conditions") &
                                 (~df_cond["item"].str.lower().isin(["stairs", "🧍prolonged standing", "walking"]))
                         ].copy()
+
                         if not df_conditions.empty:
-                                df_conditions = df_conditions.drop(columns=["category"], errors="ignore")
+                                # Only keep the columns you actually want
+                                cols_to_keep = [c for c in df_conditions.columns if c not in ["status", "quantity", "category"]]
+                                df_conditions = df_conditions[cols_to_keep]
                                 sheets["conditions"].append(df_conditions.sort_values("time", ascending=False))
 
                         # Stairs
