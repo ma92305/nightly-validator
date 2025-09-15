@@ -396,6 +396,8 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
     tachy_df_all = concat_or_empty(sheets["tachy_events"])
     sleep_stats_df = pd.DataFrame(sheets["sleep"]).sort_values("date", ascending=False, na_position="last")
     weather_stats_df = pd.DataFrame(sheets["weather"])
+    if not weather_stats_df.empty and "date" in weather_stats_df.columns:
+        weather_stats_df = weather_stats_df.sort_values("date", ascending=False, na_position="last")
     symptoms_df_all = concat_or_empty(sheets["symptoms"])
     symptom_events_df_all = concat_or_empty(sheets["symptom_events"])
     conditions_df_all = concat_or_empty(sheets["conditions"])
