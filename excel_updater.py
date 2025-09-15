@@ -212,7 +212,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
         if hourly_data:
                 df_hourly = pd.DataFrame(hourly_data)
                 df_hourly['time'] = pd.to_datetime(df_hourly['time'])
-                df_hourly['Date'] = df_hourly['time'].dt.date
+                df_hourly['date'] = df_hourly['time'].dt.date
                 df_hourly['Hour'] = df_hourly['time'].dt.hour
                 df_hourly['pressure'] = pd.to_numeric(df_hourly['pressure'], errors='coerce')
 
@@ -571,74 +571,112 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
     else:
         meds_df_all = pd.DataFrame(columns=["File", "date", "time taken", "medication", "status", "dose", "emoji"])
     
-    # --- Export to Excel ---
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        hr_stats_df.to_excel(writer, sheet_name="HR Stats", index=False)
-        tachy_df_all.to_excel(writer, sheet_name="Tachy Events", index=False)
-        sleep_stats_df.to_excel(writer, sheet_name="Sleep Stats", index=False)
-        weather_stats_df.to_excel(writer, sheet_name="Weather Stats", index=False)
-        hourly_weather_df = pd.concat(sheets["hourly_weather"], ignore_index=True) if sheets["hourly_weather"] else pd.DataFrame()
-        if not hourly_weather_df.empty:
-                hourly_weather_df.to_excel(writer, sheet_name="Hourly Weather", index=False)
-        symptoms_df_all.to_excel(writer, sheet_name="Symptoms", index=False)
-        if not symptom_events_df_all.empty:
-            startrow_events = len(symptoms_df_all) + 3
-            worksheet_symp = writer.sheets["Symptoms"]
-            worksheet_symp.write(startrow_events, 0, "Symptom Events")
-            symptom_events_df_all.to_excel(writer, sheet_name="Symptoms", startrow=startrow_events + 1, index=False)
-        conditions_df_all.to_excel(writer, sheet_name="Conditions", index=False)
-        loc_activities_df_all.to_excel(writer, sheet_name="Locations", index=False)
-        stairs_df_all.to_excel(writer, sheet_name="Stairs", index=False)
-        standing_df_all.to_excel(writer, sheet_name="Standing", index=False)
-        walking_df_all.to_excel(writer, sheet_name="Walking", index=False)
-        nutrition_general_df.to_excel(writer, sheet_name="Nutrition - General", index=False)
-        nutrition_meals_df.to_excel(writer, sheet_name="Nutrition - Meals", index=False)
-        if not daily_meals_df.empty:
-            startrow_meals = len(nutrition_meals_df) + 3
-            worksheet_meals = writer.sheets["Nutrition - Meals"]
-            worksheet_meals.write(startrow_meals, 0, "Daily Meal Totals")
-            daily_meals_df.to_excel(writer, sheet_name="Nutrition - Meals", startrow=startrow_meals + 1, index=False)
-        nutrition_liquids_df.to_excel(writer, sheet_name="Nutrition - Liquids", index=False)
-        if not daily_liquids_df.empty:
-            startrow_liquids = len(nutrition_liquids_df) + 3
-            worksheet_liquids = writer.sheets["Nutrition - Liquids"]
-            worksheet_liquids.write(startrow_liquids, 0, "Daily Liquid Totals")
-            daily_liquids_df.to_excel(writer, sheet_name="Nutrition - Liquids", startrow=startrow_liquids + 1, index=False)
-        digestion_df_all.to_excel(writer, sheet_name="Digestion", index=False)
-        meds_df_all.to_excel(writer, sheet_name="Meds", index=False)
-        validated_keys_df.to_excel(writer, sheet_name="Validated Keys", index=False)
+# --- Helper: standardize time columns ---
+def standardize_time(df, time_col="time", add_hour=True):
+    if time_col in df.columns:
+        df[time_col] = pd.to_datetime(df[time_col], errors='coerce')
+        df["date"] = df[time_col].dt.date
+        if add_hour:
+            df["hour"] = df[time_col].dt.hour
+    return df
 
-        for sheet_name, worksheet in writer.sheets.items():
-            # Map only the sheets that are *actually created as sheets*
-            df_map = {
-                "HR Stats": hr_stats_df,
-                "Tachy Events": tachy_df_all,
-                "Sleep Stats": sleep_stats_df,
-                "Weather Stats": weather_stats_df,
-                "Hourly Weather": hourly_weather_df,
-                "Symptoms": symptoms_df_all,
-                "Conditions": conditions_df_all,
-                "Locations": loc_activities_df_all,
-                "Stairs": stairs_df_all,
-                "Standing": standing_df_all,
-                "Walking": walking_df_all,
-                "Nutrition - General": nutrition_general_df,
-                "Nutrition - Meals": nutrition_meals_df,
-                "Nutrition - Liquids": nutrition_liquids_df,
-                "Digestion": digestion_df_all,
-                "Meds": meds_df_all,
-                "Validated Keys": validated_keys_df,
-            }
+# --- Standardize per-sheet ---
+symptoms_df_all = standardize_time(symptoms_df_all)
+symptom_events_df_all = standardize_time(symptom_events_df_all)
+conditions_df_all = standardize_time(conditions_df_all)
+loc_activities_df_all = standardize_time(loc_activities_df_all)
+stairs_df_all = standardize_time(stairs_df_all)
+standing_df_all = standardize_time(standing_df_all)
+walking_df_all = standardize_time(walking_df_all)
+digestion_df_all = standardize_time(digestion_df_all)
+nutrition_general_df = standardize_time(nutrition_general_df)
+nutrition_meals_df = standardize_time(nutrition_meals_df)
+nutrition_liquids_df = standardize_time(nutrition_liquids_df)
 
-            df = df_map.get(sheet_name)
-            if df is not None and not df.empty:
-                for i, col in enumerate(df.columns):
-                    max_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
-                    worksheet.set_column(i, i, max_len)
-    
-    output.seek(0)
-    excel_path = f"{dropbox_folder_path}/{EXCEL_FILENAME}"
-    dbx.files_upload(output.read(), excel_path, mode=dropbox.files.WriteMode.overwrite)
+# Standardize meds time
+if not meds_df_all.empty:
+    meds_df_all["time taken"] = pd.to_datetime(meds_df_all["time taken"], errors='coerce')
+    meds_df_all["date"] = meds_df_all["time taken"].dt.date
+    meds_df_all["hour"] = meds_df_all["time taken"].dt.hour
 
-    print("✅ Incremental parallel Excel updated in Dropbox:", excel_path)
+# Standardize sleep
+sleep_stats_df["bedtime"] = pd.to_datetime(sleep_stats_df["bedtime"], errors='coerce')
+sleep_stats_df["waketime"] = pd.to_datetime(sleep_stats_df["waketime"], errors='coerce')
+sleep_stats_df["date"] = sleep_stats_df["bedtime"].dt.date
+sleep_stats_df["hour_bedtime"] = sleep_stats_df["bedtime"].dt.hour
+sleep_stats_df["hour_waketime"] = sleep_stats_df["waketime"].dt.hour
+
+# Standardize hourly weather
+if not hourly_weather_df.empty:
+    hourly_weather_df['time'] = pd.to_datetime(hourly_weather_df['time'], errors='coerce')
+    hourly_weather_df['date'] = hourly_weather_df['time'].dt.date
+    hourly_weather_df['hour'] = hourly_weather_df['time'].dt.hour
+
+# --- Export to Excel ---
+output = BytesIO()
+with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+    hr_stats_df.to_excel(writer, sheet_name="HR Stats", index=False)
+    tachy_df_all.to_excel(writer, sheet_name="Tachy Events", index=False)
+    sleep_stats_df.to_excel(writer, sheet_name="Sleep Stats", index=False)
+    weather_stats_df.to_excel(writer, sheet_name="Weather Stats", index=False)
+    if not hourly_weather_df.empty:
+        hourly_weather_df.to_excel(writer, sheet_name="Hourly Weather", index=False)
+    symptoms_df_all.to_excel(writer, sheet_name="Symptoms", index=False)
+    if not symptom_events_df_all.empty:
+        startrow_events = len(symptoms_df_all) + 3
+        worksheet_symp = writer.sheets["Symptoms"]
+        worksheet_symp.write(startrow_events, 0, "Symptom Events")
+        symptom_events_df_all.to_excel(writer, sheet_name="Symptoms", startrow=startrow_events + 1, index=False)
+    conditions_df_all.to_excel(writer, sheet_name="Conditions", index=False)
+    loc_activities_df_all.to_excel(writer, sheet_name="Locations", index=False)
+    stairs_df_all.to_excel(writer, sheet_name="Stairs", index=False)
+    standing_df_all.to_excel(writer, sheet_name="Standing", index=False)
+    walking_df_all.to_excel(writer, sheet_name="Walking", index=False)
+    nutrition_general_df.to_excel(writer, sheet_name="Nutrition - General", index=False)
+    nutrition_meals_df.to_excel(writer, sheet_name="Nutrition - Meals", index=False)
+    if not daily_meals_df.empty:
+        startrow_meals = len(nutrition_meals_df) + 3
+        worksheet_meals = writer.sheets["Nutrition - Meals"]
+        worksheet_meals.write(startrow_meals, 0, "Daily Meal Totals")
+        daily_meals_df.to_excel(writer, sheet_name="Nutrition - Meals", startrow=startrow_meals + 1, index=False)
+    nutrition_liquids_df.to_excel(writer, sheet_name="Nutrition - Liquids", index=False)
+    if not daily_liquids_df.empty:
+        startrow_liquids = len(nutrition_liquids_df) + 3
+        worksheet_liquids = writer.sheets["Nutrition - Liquids"]
+        worksheet_liquids.write(startrow_liquids, 0, "Daily Liquid Totals")
+        daily_liquids_df.to_excel(writer, sheet_name="Nutrition - Liquids", startrow=startrow_liquids + 1, index=False)
+    digestion_df_all.to_excel(writer, sheet_name="Digestion", index=False)
+    meds_df_all.to_excel(writer, sheet_name="Meds", index=False)
+    validated_keys_df.to_excel(writer, sheet_name="Validated Keys", index=False)
+
+    # Auto-adjust column widths
+    for sheet_name, worksheet in writer.sheets.items():
+        df_map = {
+            "HR Stats": hr_stats_df,
+            "Tachy Events": tachy_df_all,
+            "Sleep Stats": sleep_stats_df,
+            "Weather Stats": weather_stats_df,
+            "Hourly Weather": hourly_weather_df,
+            "Symptoms": symptoms_df_all,
+            "Conditions": conditions_df_all,
+            "Locations": loc_activities_df_all,
+            "Stairs": stairs_df_all,
+            "Standing": standing_df_all,
+            "Walking": walking_df_all,
+            "Nutrition - General": nutrition_general_df,
+            "Nutrition - Meals": nutrition_meals_df,
+            "Nutrition - Liquids": nutrition_liquids_df,
+            "Digestion": digestion_df_all,
+            "Meds": meds_df_all,
+            "Validated Keys": validated_keys_df,
+        }
+        df = df_map.get(sheet_name)
+        if df is not None and not df.empty:
+            for i, col in enumerate(df.columns):
+                max_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
+                worksheet.set_column(i, i, max_len)
+
+output.seek(0)
+excel_path = f"{dropbox_folder_path}/{EXCEL_FILENAME}"
+dbx.files_upload(output.read(), excel_path, mode=dropbox.files.WriteMode.overwrite)
+print("✅ Incremental parallel Excel updated in Dropbox:", excel_path)
