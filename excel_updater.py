@@ -1,4 +1,3 @@
-
 import json
 import pandas as pd
 import warnings
@@ -351,17 +350,17 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
         # Stairs
         stair_list = parse_activity_list(activity.get("stair_list"))
         if stair_list is None:
-            sheets["stairs"].append(pd.DataFrame([{"Date": date}]))
+            sheets["stairs"].append(pd.DataFrame([{"Date": file_date}]))
         elif stair_list == "None":
             sheets["stairs"].append(pd.DataFrame([{
-                "Date": date,
+                "Date": file_date,
                 "Quantity": "None",
                 "Time": "None",
                 "Item": "None",
             }]))
         else:
             df_stairs = pd.DataFrame([{
-                "Date": date,
+                "Date": file_date,
                 "Quantity": e.get("quantity"),
                 "Time": e.get("time"),
                 "Item": e.get("item"),
@@ -371,10 +370,10 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
         # Standing
         stand_list = parse_activity_list(activity.get("stand_list"))
         if stand_list is None:
-            sheets["standing"].append(pd.DataFrame([{"Date": date}]))
+            sheets["standing"].append(pd.DataFrame([{"Date": file_date}]))
         elif stand_list == "None":
             sheets["standing"].append(pd.DataFrame([{
-                "Date": date,
+                "Date": file_date,
                 "Duration": "None",
                 "Start_time": "None",
                 "End_time": "None",
@@ -382,7 +381,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
             }]))
         else:
             df_standing = pd.DataFrame([{
-                "Date": date,
+                "Date": file_date,
                 "Duration": e.get("duration"),
                 "Start_time": e.get("start_time"),
                 "End_time": e.get("end_time"),
@@ -393,10 +392,10 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
         # Walking
         walk_list = parse_activity_list(activity.get("walk_list"))
         if walk_list is None:
-            sheets["walking"].append(pd.DataFrame([{"Date": date}]))
+            sheets["walking"].append(pd.DataFrame([{"Date": file_date}]))
         elif walk_list == "None":
             sheets["walking"].append(pd.DataFrame([{
-                "Date": date,
+                "Date": file_date,
                 "Steps/min": "None",
                 "Steps": "None",
                 "Start_time": "None",
@@ -405,7 +404,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
             }]))
         else:
             df_walking = pd.DataFrame([{
-                "Date": date,
+                "Date": file_date,
                 "Steps/min": e.get("steps/min"),
                 "Steps": e.get("steps"),
                 "Start_time": e.get("start_time"),
