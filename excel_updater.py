@@ -1,3 +1,4 @@
+
 import json
 import pandas as pd
 import warnings
@@ -13,11 +14,6 @@ quantity_map = {
     "moderate": 3,
     "a lot": 4
 }
-
-def safe_date(date_str):
-    """Convert string to datetime.date safely, return None if invalid."""
-    dt = pd.to_datetime(date_str, errors="coerce")
-    return dt.date() if pd.notna(dt) else None
 
 def map_amount_to_number(amount_str):
     if not isinstance(amount_str, str):
@@ -175,27 +171,13 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
 
     # --- Containers for all sheets ---
     sheets = {
-        "hourly_weather": [],
-        "symptoms": [],
-        "symptom_events": [],
-        "conditions": [],
-        "activities": [],
-        "stairs": [],
-        "standing": [],
-        "walking": [],
-        "nutrition_general": [],
-        "nutrition_meals": [],
-        "nutrition_liquids": [],
-        "digestion": [],
-        "meds": [],
-        "validated_keys": [],
+        "hr_stats": [], "tachy_events": [], "sleep": [], "weather": [],
+        "symptoms": [], "symptom_events": [], "conditions": [], "activities": [],
+        "stairs": [], "standing": [], "walking": [],
+        "nutrition_general": [], "nutrition_meals": [], "nutrition_liquids": [],
+        "digestion": [], "meds": [], "daily_liquids": [], "daily_meals": [],
         "validated_flags": [],
-        "hr_stats": [],
-        "tachy_events": [],
-        "sleep": [],
-        "weather": [],
-        "daily_liquids": [],
-        "daily_meals": []
+        "hourly_weather": []   # <--- add this line
     }
 
     # --- Process cached logs ---
@@ -212,9 +194,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
             row_flags[k] = bool(v)
         sheets["validated_flags"].append(row_flags)
 
-        file_date = safe_date(date_str)
-        if file_date is None:
-            continue  
+        file_date = pd.to_datetime(date_str, errors="coerce").date()
 
         # --- HR & Tachy Events ---
         hr = data.get("heartrate_entries", {})
@@ -354,26 +334,23 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
                                 df_activities = df_activities.drop(columns=["quantity"], errors="ignore")
                                 sheets["activities"].append(df_activities.sort_values("time", ascending=False))
 
-        # --- ACTIVITY ENTRIES (new dedicated section) ---
-        activity_entries = clean_entries(
-            data.get("activity_entries", []),
-            required_fields=["item","time"]
-        )
-        if activity_entries:
-            df_activity = pd.DataFrame(activity_entries)
-            df_activity["time"] = pd.to_datetime(df_activity["time"], errors='coerce')
-            df_activity["File"] = filename
+                        # Stairs (keep quantity, drop status)
+                        df_stairs = df_cond[df_cond["item"].str.lower() == "stairs"].copy()
+                        if not df_stairs.empty:
+                                df_stairs = df_stairs.drop(columns=["status"], errors="ignore")
+                                sheets["stairs"].append(df_stairs.sort_values("time", ascending=False))
 
-            walking_df = df_activity[df_activity["item"].astype(str).str.contains("🚶", na=False)]
-            standing_df = df_activity[df_activity["item"].astype(str).str.contains("🧍", na=False)]
-            stairs_df  = df_activity[df_activity["item"].astype(str).str.contains("🪜", na=False)]
+                        # Prolonged standing (keep status, drop quantity)
+                        df_standing = df_cond[df_cond["item"].str.lower() == "🧍prolonged standing"].copy()
+                        if not df_standing.empty:
+                                df_standing = df_standing.drop(columns=["quantity"], errors="ignore")
+                                sheets["standing"].append(df_standing.sort_values("time", ascending=False))
 
-            if not walking_df.empty:
-                sheets["walking"].append(walking_df.sort_values("time", ascending=False))
-            if not standing_df.empty:
-                sheets["standing"].append(standing_df.sort_values("time", ascending=False))
-            if not stairs_df.empty:
-                sheets["stairs"].append(stairs_df.sort_values("time", ascending=False))
+                        # Walking (keep status, drop quantity)
+                        df_walking = df_cond[df_cond["item"].str.lower() == "walking"].copy()
+                        if not df_walking.empty:
+                                df_walking = df_walking.drop(columns=["quantity"], errors="ignore")
+                                sheets["walking"].append(df_walking.sort_values("time", ascending=False))
 
         # --- NUTRITION ---
         if val_dict.get("nutrition_valid", False):
@@ -545,9 +522,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
         if not med_valid:
             continue
 
-        file_date = safe_date(date_str)
-        if file_date is None:
-            continue  # skip invalid entries
+        file_date = pd.to_datetime(date_str, errors="coerce").date()
         meds_entries = data.get("med_entries", []) or []
         for m in meds_entries:
             if not isinstance(m, dict):
@@ -578,9 +553,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
             # skip adding meds for this date per your rule
             continue
 
-        file_date = safe_date(date_str)
-        if file_date is None:
-            continue  # skip invalid entries
+        file_date = pd.to_datetime(date_str, errors="coerce").date()
         meds_entries = data.get("med_entries", []) or []
         # normalize med entries for quick lookup (case-insensitive)
         meds_lookup = {}
@@ -703,12 +676,6 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
         stairs_df_all.to_excel(writer, sheet_name="Stairs", index=False)
         standing_df_all.to_excel(writer, sheet_name="Standing", index=False)
         walking_df_all.to_excel(writer, sheet_name="Walking", index=False)
-        activity_entries_df_all = (
-            pd.concat(sheets["activity_entries"], ignore_index=True)
-            if sheets["activity_entries"] else pd.DataFrame()
-        )
-        if not activity_entries_df_all.empty:
-            activity_entries_df_all.to_excel(writer, sheet_name="Activity Entries", index=False)
         nutrition_general_df.to_excel(writer, sheet_name="Nutrition - General", index=False)
         nutrition_meals_df.to_excel(writer, sheet_name="Nutrition - Meals", index=False)
         if not daily_meals_df.empty:
