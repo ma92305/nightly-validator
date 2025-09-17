@@ -1,13 +1,32 @@
-
-
 import json
 import pandas as pd
 import warnings
 from io import BytesIO
 import dropbox
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date
 
 EXCEL_FILENAME = "combined_data.xlsx"
+
+def safe_parse_date(val):
+    """
+    Tries to parse `val` into a datetime.date object.
+    Returns None if parsing fails or value is pd.NaT.
+    Accepts: str, datetime/date, pd.Timestamp, etc.
+    """
+    if val is None or val is pd.NaT:
+        return None
+    try:
+        # If already a date but not a datetime, return as-is
+        if isinstance(val, date) and not hasattr(val, "hour"):
+            return val
+        # Handles pd.Timestamp, datetime, etc.
+        dt = pd.to_datetime(val, errors="coerce")
+        if pd.isna(dt):
+            return None
+        return dt.date()
+    except Exception:
+        return None
 
 quantity_map = {
     "a little": 1,
@@ -195,7 +214,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
             row_flags[k] = bool(v)
         sheets["validated_flags"].append(row_flags)
 
-        file_date = pd.to_datetime(date_str, errors="coerce").date()
+        file_date = safe_parse_date(date_str)
 
         # --- HR & Tachy Events ---
         hr = data.get("heartrate_entries", {})
@@ -251,7 +270,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
 
         # --- Sleep & Weather ---
         sleep = data.get("sleep_entries", {})
-        sleep_date = pd.to_datetime(sleep.get("bedtime"), errors='coerce').date() if sleep.get("bedtime") else file_date
+        sleep_date = safe_parse_date(sleep.get("bedtime")) if sleep.get("bedtime") else file_date
         sheets["sleep"].append({
             "File": filename,
             "date": sleep_date,
@@ -437,7 +456,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
         validated_keys_df["date"] = (
             validated_keys_df["File"]
             .str.extract(r"health_log_(\d{4}-\d{2}-\d{2})")[0]
-            .apply(pd.to_datetime, errors="coerce")
+            .apply(safe_parse_date)
         )
         validated_keys_df = validated_keys_df.sort_values("date", ascending=False).reset_index(drop=True)
 
@@ -523,7 +542,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
         if not med_valid:
             continue
 
-        file_date = pd.to_datetime(date_str, errors="coerce").date()
+        file_date = safe_parse_date(date_str)
         meds_entries = data.get("med_entries", []) or []
         for m in meds_entries:
             if not isinstance(m, dict):
@@ -532,7 +551,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
             status = str(m.get("status", "")).strip().lower()
             if name and status == "taken":
                 existing = first_taken_date.get(name)
-                if existing is None or file_date < existing:
+                if file_date is not None and (existing is None or (existing is not None and file_date < existing)):
                     first_taken_date[name] = file_date
 
     # Also ensure all meds in master_order are in first_taken_date only if they were ever taken;
@@ -554,7 +573,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
             # skip adding meds for this date per your rule
             continue
 
-        file_date = pd.to_datetime(date_str, errors="coerce").date()
+        file_date = safe_parse_date(date_str)
         meds_entries = data.get("med_entries", []) or []
         # normalize med entries for quick lookup (case-insensitive)
         meds_lookup = {}
@@ -591,8 +610,8 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
             med_cat = med_info.get("category", "unknown")
             # include only if med has a recorded first-taken date and that date <= this file_date
             first_date = first_taken_date.get(med_name) or first_taken_date.get(med_key)
-            if first_date is None:
-                # never recorded taken anywhere yet -> do not include on any date
+            if first_date is None or file_date is None:
+                # never recorded taken anywhere yet or invalid file_date -> do not include on any date
                 continue
             if first_date and file_date < first_date:
                 # this date is before med first taken -> skip
