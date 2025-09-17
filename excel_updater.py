@@ -14,6 +14,11 @@ quantity_map = {
     "a lot": 4
 }
 
+def safe_date(date_str):
+    """Convert string to datetime.date safely, return None if invalid."""
+    dt = pd.to_datetime(date_str, errors="coerce")
+    return dt.date() if pd.notna(dt) else None
+
 def map_amount_to_number(amount_str):
     if not isinstance(amount_str, str):
         return 0
@@ -207,7 +212,9 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
             row_flags[k] = bool(v)
         sheets["validated_flags"].append(row_flags)
 
-        file_date = pd.to_datetime(date_str, errors="coerce").date()
+        file_date = safe_date(date_str)
+        if file_date is None:
+            continue  
 
         # --- HR & Tachy Events ---
         hr = data.get("heartrate_entries", {})
@@ -538,7 +545,9 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
         if not med_valid:
             continue
 
-        file_date = pd.to_datetime(date_str, errors="coerce").date()
+        file_date = safe_date(date_str)
+        if file_date is None:
+            continue  # skip invalid entries
         meds_entries = data.get("med_entries", []) or []
         for m in meds_entries:
             if not isinstance(m, dict):
@@ -569,7 +578,9 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
             # skip adding meds for this date per your rule
             continue
 
-        file_date = pd.to_datetime(date_str, errors="coerce").date()
+        file_date = safe_date(date_str)
+        if file_date is None:
+            continue  # skip invalid entries
         meds_entries = data.get("med_entries", []) or []
         # normalize med entries for quick lookup (case-insensitive)
         meds_lookup = {}
