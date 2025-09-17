@@ -172,6 +172,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
     sheets = {
         "hourly_weather": [],
         "symptoms": [],
+        "symptom_events": [],
         "conditions": [],
         "activities": [],
         "stairs": [],
@@ -182,7 +183,14 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
         "nutrition_liquids": [],
         "digestion": [],
         "meds": [],
-        "validated_keys": []
+        "validated_keys": [],
+        "validated_flags": [],
+        "hr_stats": [],
+        "tachy_events": [],
+        "sleep": [],
+        "weather": [],
+        "daily_liquids": [],
+        "daily_meals": []
     }
 
     # --- Process cached logs ---
