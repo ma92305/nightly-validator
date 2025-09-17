@@ -572,14 +572,15 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
                 idx += 1
 
     # If some meds appear in files but not in all_lists, we'll add them at the end when discovered
-    # First pass: discover first-taken date per med across ALL cached logs
+    # --- MEDS: first-taken discovery ---
     first_taken_date = {}  # med_name -> first date (datetime.date)
 
     for date_str, payload in cache["logs"].items():
-        # only consider logs where med entries were validated
         data = payload.get("data", {})
         validated = data.get("validated_entries", {})
         val_dict = validated[0] if isinstance(validated, list) and validated else validated
+
+        # Determine if meds are valid for this file
         med_valid = False
         if isinstance(val_dict, dict):
             med_valid = bool(str(val_dict.get("med_valid", val_dict.get("medications_valid", False))).lower() == "true")
@@ -588,11 +589,11 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
         if not med_valid:
             continue
 
-        # Normalize file_date to a real date or None
-        file_date = pd.to_datetime(date_str, errors="coerce")
-        if pd.isna(file_date):
+        # Parse file date safely
+        parsed_date = pd.to_datetime(date_str, errors="coerce")
+        if parsed_date is pd.NaT:
             continue
-        file_date = file_date.date()
+        file_date = parsed_date.date()
 
         meds_entries = data.get("med_entries", []) or []
         for m in meds_entries:
@@ -602,12 +603,8 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
             status = str(m.get("status", "")).strip().lower()
             if name and status == "taken":
                 existing = first_taken_date.get(name)
-
-                # Fix: if existing is NaT, treat as None
-                if pd.isna(existing):
-                    existing = None
-
-                if existing is None or file_date < existing:
+                # Only store valid dates
+                if existing is None or (existing and file_date < existing):
                     first_taken_date[name] = file_date
 
     # Now build meds rows for every validated file/date
