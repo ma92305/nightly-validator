@@ -15,7 +15,26 @@ import pandas as pd
 
 importlib.reload(excel_updater)
 
+EXCEL_PATH = "/Users/melinaahmad/Library/Mobile Documents/com~apple~CloudDocs/Shortcuts/New/combined_data.xlsx"
+
+@st.cache_data
+def load_all_data(path):
+    sheets = pd.read_excel(path, sheet_name=None)
+    for name, df in sheets.items():
+        for col in df.columns:
+            if "time" in col.lower() or "date" in col.lower():
+                try:
+                    df[col] = pd.to_datetime(df[col], errors="ignore")
+                except Exception:
+                    pass
+        sheets[name] = df
+    return sheets
+
+data = load_all_data(EXCEL_PATH)
+symptoms_df = data.get("Symptoms", pd.DataFrame())
+
 def validate_logs_page():
+    
     # -----------------------------
     # Config
     # -----------------------------
@@ -105,24 +124,6 @@ def validate_logs_page():
     CONDITION_OPTIONS = st.session_state.all_lists.get("conditions", [])
     AMOUNT_OPTIONS = ["A little", "Some", "Moderate", "A lot"]
 
-    EXCEL_PATH = "/Users/melinaahmad/Library/Mobile Documents/com~apple~CloudDocs/Shortcuts/New/combined_data.xlsx"
-
-    @st.cache_data
-    def load_all_data(path):
-        sheets = pd.read_excel(path, sheet_name=None)
-        for name, df in sheets.items():
-            for col in df.columns:
-                if "time" in col.lower() or "date" in col.lower():
-                    try:
-                        df[col] = pd.to_datetime(df[col], errors="ignore")
-                    except Exception:
-                        pass
-            sheets[name] = df
-        return sheets
-
-    data = load_all_data(EXCEL_PATH)
-    symptoms_df = data.get("Symptoms", pd.DataFrame())
-    
     # -----------------------------
     # Utils
     # -----------------------------
