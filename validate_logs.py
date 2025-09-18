@@ -13,332 +13,266 @@ import excel_updater
 
 importlib.reload(excel_updater)
 
-import streamlit as st
-
-# --- Main Pages ---
 def validate_logs_page():
-    st.header("Validate Logs")
-    # All your existing code for log validation goes here.
-    # (Move your current Streamlit UI blocks here.)
-
-def symptoms_page():
-    st.subheader("Symptoms Data")
-    st.info("Symptoms data page coming soon.")
-
-def hr_page():
-    st.subheader("Heart Rate Data")
-    st.info("Heart rate page coming soon.")
-
-def sleep_page():
-    st.subheader("Sleep Data")
-    st.info("Sleep data page coming soon.")
-
-def nutrition_page():
-    st.subheader("Nutrition Data")
-    st.info("Nutrition data page coming soon.")
-
-def weather_page():
-    st.subheader("Weather Data")
-    st.info("Weather page coming soon.")
-
-def conditions_page():
-    st.subheader("Conditions Data")
-    st.info("Conditions page coming soon.")
-
-def correlation_page():
-    st.subheader("Correlations")
-    st.info("Correlation analysis coming soon.")
-
-def view_data_page():
-    st.header("View Data")
-    subpage = st.selectbox("Select sub-page:", ["Symptoms", "Heart Rate", "Sleep", "Nutrition", "Activity", "Other"])
-    if subpage == "Symptoms":
-        symptoms_page()
-    elif subpage == "Heart Rate":
-        hr_page()
-    elif subpage == "Sleep":
-        sleep_page()
-    elif subpage == "Nutrition":
-        nutrition_page()
-    elif subpage == "Activity":
-        st.info("Activity page coming soon.")
-    elif subpage == "Other":
-        weather_page()
-        conditions_page()
-
-def correlations_page():
-    correlation_page()  # Existing function
-
-# --- Sidebar Navigation ---
-PAGES = {
-    "Validate Logs": validate_logs_page,
-    "View Data": view_data_page,
-    "Correlations": correlations_page
-}
-
-st.sidebar.title("Navigation")
-selection = st.sidebar.radio("Go to:", list(PAGES.keys()))
-PAGES[selection]()
-
-# -----------------------------
-# Config
-# -----------------------------
-st.set_page_config(
-    page_title="Nightly Validator",
-    page_icon="favicon.png",
-)
-
-dbx = dropbox.Dropbox(
-    oauth2_refresh_token=st.secrets["dropbox_refresh_token"],
-    app_key=st.secrets["dropbox_app_key"],
-    app_secret=st.secrets["dropbox_app_secret"]
-)
-
-DROPBOX_FOLDER = "/HealthLogs"
-
-SEVERITIES = ["None", "⚪️", "🟡", "🟠", "🔴", "🟣"]
-
-COLOR_MAP = {
-    "None": (0.6, 0.6, 0.6),
-    "⚪️": (1.0, 1.0, 1.0),
-    "🟡": (1.0, 1.0, 0.0),
-    "🟠": (1.0, 0.65, 0.0),
-    "🔴": (1.0, 0.0, 0.0),
-    "🟣": (0.5, 0.0, 0.5),
-}
-
-MINUTES_IN_DAY = 24 * 60
-
-# -----------------------------
-# Aggressive caching for reference data
-# -----------------------------
-@st.cache_data(ttl=3600, show_spinner=False)  # 1 hour cache for all_lists
-def get_all_lists_cached():
-    path = f"{DROPBOX_FOLDER}/all_lists.json"
-    try:
-        md, res = dbx.files_download(path)
-        return json.loads(res.content.decode("utf-8"))
-    except Exception:
-        return {}
-
-# -----------------------------
-# Dropbox Helpers
-# -----------------------------
-def dropbox_read_json(filename):
-    path = f"{DROPBOX_FOLDER}/{filename}"
-    try:
-        md, res = dbx.files_download(path)
-        return json.loads(res.content.decode("utf-8"))
-    except dropbox.exceptions.ApiError:
-        return {}
-    except Exception:
-        return {}
-
-def dropbox_write_json(filename, data):
-    path = f"{DROPBOX_FOLDER}/{filename}"
-    dbx.files_upload(
-        json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode("utf-8"),
-        path,
-        mode=WriteMode.overwrite
+    # -----------------------------
+    # Config
+    # -----------------------------
+    st.set_page_config(
+        page_title="Nightly Validator",
+        page_icon="favicon.png",
     )
 
-def load_log(date):
-    filename = f"health_log_{date.strftime('%Y-%m-%d')}.txt"
-    return dropbox_read_json(filename)
+    dbx = dropbox.Dropbox(
+        oauth2_refresh_token=st.secrets["dropbox_refresh_token"],
+        app_key=st.secrets["dropbox_app_key"],
+        app_secret=st.secrets["dropbox_app_secret"]
+    )
 
-def save_log(date, data):
-    data_to_save = json.loads(json.dumps(data))
-    data_to_save["validated"] = True
-    restored_data = restore_emojis_and_times(data_to_save)
-    filename = f"health_log_{date.strftime('%Y-%m-%d')}.txt"
-    dropbox_write_json(filename, restored_data)
+    DROPBOX_FOLDER = "/HealthLogs"
 
-# -----------------------------
-# Load reference lists ONCE (cached)
-# -----------------------------
-if "all_lists" not in st.session_state:
-    all_lists = get_all_lists_cached()
-    if not all_lists:
-        st.error("⚠️ all_lists.json not found in Dropbox /HealthLogs")
-        all_lists = {}
-    st.session_state.all_lists = all_lists
+    SEVERITIES = ["None", "⚪️", "🟡", "🟠", "🔴", "🟣"]
 
-ALL_CONDITIONS = st.session_state.all_lists.get("conditions", [])
-NUTRITION_OPTIONS = st.session_state.all_lists.get("nutrition", [])
-STANDARD_SYMPTOMS = st.session_state.all_lists.get("symptoms", [])
-CONDITION_OPTIONS = st.session_state.all_lists.get("conditions", [])
-AMOUNT_OPTIONS = ["A little", "Some", "Moderate", "A lot"]
+    COLOR_MAP = {
+        "None": (0.6, 0.6, 0.6),
+        "⚪️": (1.0, 1.0, 1.0),
+        "🟡": (1.0, 1.0, 0.0),
+        "🟠": (1.0, 0.65, 0.0),
+        "🔴": (1.0, 0.0, 0.0),
+        "🟣": (0.5, 0.0, 0.5),
+    }
 
-# -----------------------------
-# Utils
-# -----------------------------
-def normalize_emoji(s):
-    if not isinstance(s, str):
-        return s
-    return unicodedata.normalize("NFKC", s).strip()
+    MINUTES_IN_DAY = 24 * 60
 
-def parse_datetime_safe(time_str):
-    try:
-        return datetime.fromisoformat(time_str)
-    except Exception:
+    # -----------------------------
+    # Aggressive caching for reference data
+    # -----------------------------
+    @st.cache_data(ttl=3600, show_spinner=False)  # 1 hour cache for all_lists
+    def get_all_lists_cached():
+        path = f"{DROPBOX_FOLDER}/all_lists.json"
         try:
-            time_str_clean = time_str.replace("\u202f", " ")
-            return datetime.strptime(time_str_clean, "%b %d, %Y at %I:%M %p")
+            md, res = dbx.files_download(path)
+            return json.loads(res.content.decode("utf-8"))
+        except Exception:
+            return {}
+
+    # -----------------------------
+    # Dropbox Helpers
+    # -----------------------------
+    def dropbox_read_json(filename):
+        path = f"{DROPBOX_FOLDER}/{filename}"
+        try:
+            md, res = dbx.files_download(path)
+            return json.loads(res.content.decode("utf-8"))
+        except dropbox.exceptions.ApiError:
+            return {}
+        except Exception:
+            return {}
+
+    def dropbox_write_json(filename, data):
+        path = f"{DROPBOX_FOLDER}/{filename}"
+        dbx.files_upload(
+            json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode("utf-8"),
+            path,
+            mode=WriteMode.overwrite
+        )
+
+    def load_log(date):
+        filename = f"health_log_{date.strftime('%Y-%m-%d')}.txt"
+        return dropbox_read_json(filename)
+
+    def save_log(date, data):
+        data_to_save = json.loads(json.dumps(data))
+        data_to_save["validated"] = True
+        restored_data = restore_emojis_and_times(data_to_save)
+        filename = f"health_log_{date.strftime('%Y-%m-%d')}.txt"
+        dropbox_write_json(filename, restored_data)
+
+    # -----------------------------
+    # Load reference lists ONCE (cached)
+    # -----------------------------
+    if "all_lists" not in st.session_state:
+        all_lists = get_all_lists_cached()
+        if not all_lists:
+            st.error("⚠️ all_lists.json not found in Dropbox /HealthLogs")
+            all_lists = {}
+        st.session_state.all_lists = all_lists
+
+    ALL_CONDITIONS = st.session_state.all_lists.get("conditions", [])
+    NUTRITION_OPTIONS = st.session_state.all_lists.get("nutrition", [])
+    STANDARD_SYMPTOMS = st.session_state.all_lists.get("symptoms", [])
+    CONDITION_OPTIONS = st.session_state.all_lists.get("conditions", [])
+    AMOUNT_OPTIONS = ["A little", "Some", "Moderate", "A lot"]
+
+    # -----------------------------
+    # Utils
+    # -----------------------------
+    def normalize_emoji(s):
+        if not isinstance(s, str):
+            return s
+        return unicodedata.normalize("NFKC", s).strip()
+
+    def parse_datetime_safe(time_str):
+        try:
+            return datetime.fromisoformat(time_str)
         except Exception:
             try:
-                return datetime.strptime(time_str, "%Y-%m-%d %H:%M")
+                time_str_clean = time_str.replace("\u202f", " ")
+                return datetime.strptime(time_str_clean, "%b %d, %Y at %I:%M %p")
             except Exception:
-                return datetime.min
-
-def restore_emojis_and_times(obj):
-    if isinstance(obj, list):
-        return [restore_emojis_and_times(x) for x in obj]
-    elif isinstance(obj, dict):
-        new_dict = {}
-        for k, v in obj.items():
-            if k == "severity" and isinstance(v, str):
-                new_dict[k] = normalize_emoji(v)
-            elif k in ("time", "time_taken") and isinstance(v, str):
-                dt = None
                 try:
-                    dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
+                    return datetime.strptime(time_str, "%Y-%m-%d %H:%M")
                 except Exception:
+                    return datetime.min
+
+    def restore_emojis_and_times(obj):
+        if isinstance(obj, list):
+            return [restore_emojis_and_times(x) for x in obj]
+        elif isinstance(obj, dict):
+            new_dict = {}
+            for k, v in obj.items():
+                if k == "severity" and isinstance(v, str):
+                    new_dict[k] = normalize_emoji(v)
+                elif k in ("time", "time_taken") and isinstance(v, str):
+                    dt = None
                     try:
-                        dt = datetime.strptime(v, "%b %d, %Y at %I:%M %p")
+                        dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
                     except Exception:
                         try:
-                            dt = datetime.strptime(v, "%Y-%m-%d %H:%M")
+                            dt = datetime.strptime(v, "%b %d, %Y at %I:%M %p")
                         except Exception:
-                            dt = None
-                if dt:
-                    if k == "time_taken":
-                        new_dict[k] = dt.strftime("%Y-%m-%d %H:%M")
+                            try:
+                                dt = datetime.strptime(v, "%Y-%m-%d %H:%M")
+                            except Exception:
+                                dt = None
+                    if dt:
+                        if k == "time_taken":
+                            new_dict[k] = dt.strftime("%Y-%m-%d %H:%M")
+                        else:
+                            new_dict[k] = dt.strftime("%b %-d, %Y at %-I:%M %p")
                     else:
-                        new_dict[k] = dt.strftime("%b %-d, %Y at %-I:%M %p")
+                        new_dict[k] = v
                 else:
-                    new_dict[k] = v
+                    new_dict[k] = restore_emojis_and_times(v)
+            return new_dict
+        elif isinstance(obj, str):
+            return normalize_emoji(obj)
+        return obj
+
+    # -----------------------------
+    # Build minute timeline (helper for symptoms)
+    # -----------------------------
+    def build_minute_timeline(entries, selected_date, prev_last_entry="⚪️", universal_start_min=None):
+        timeline = ["⚪️"] * MINUTES_IN_DAY
+        entries_sorted = sorted(entries, key=lambda e: parse_datetime_safe(e["time"]) if e.get("time") else datetime.min)
+        for i, entry in enumerate(entries_sorted):
+            if not entry.get("time"):
+                continue
+            entry_min = (parse_datetime_safe(entry["time"]) - datetime.combine(selected_date, datetime.min.time())).seconds // 60
+            if i + 1 < len(entries_sorted):
+                next_min = (parse_datetime_safe(entries_sorted[i + 1]["time"]) - datetime.combine(selected_date, datetime.min.time())).seconds // 60
             else:
-                new_dict[k] = restore_emojis_and_times(v)
-        return new_dict
-    elif isinstance(obj, str):
-        return normalize_emoji(obj)
-    return obj
+                next_min = MINUTES_IN_DAY
+            entry_min = max(0, min(entry_min, MINUTES_IN_DAY))
+            next_min = max(0, min(next_min, MINUTES_IN_DAY))
+            if next_min > entry_min:
+                timeline[entry_min:next_min] = [entry.get("severity", "⚪️")] * (next_min - entry_min)
+        for i in range(0, 3*60):
+            if timeline[i] == "⚪️":
+                timeline[i] = prev_last_entry
+        timeline[3*60] = "None"
+        if universal_start_min is None:
+            post_3am_entries = [
+                e for e in entries_sorted
+                if e.get("time") and (parse_datetime_safe(e["time"]) - datetime.combine(selected_date, datetime.min.time())).seconds // 60 > 3*60
+            ]
+            if post_3am_entries:
+                universal_start_dt = min(parse_datetime_safe(e["time"]) for e in post_3am_entries)
+                universal_start_min = (universal_start_dt - datetime.combine(selected_date, datetime.min.time())).seconds // 60
+            else:
+                universal_start_min = 3*60 + 1
+        for i in range(3*60 + 1, universal_start_min):
+            if i < MINUTES_IN_DAY:
+                timeline[i] = "None"
+        last_known = timeline[universal_start_min] if universal_start_min < MINUTES_IN_DAY else "⚪️"
+        for i in range(universal_start_min, MINUTES_IN_DAY):
+            if timeline[i] not in ["None"]:
+                last_known = timeline[i]
+            else:
+                timeline[i] = last_known
+        now = datetime.now()
+        if selected_date == now.date():
+            timeline = timeline[:now.hour*60 + now.minute]
+        return timeline
 
-# -----------------------------
-# Build minute timeline (helper for symptoms)
-# -----------------------------
-def build_minute_timeline(entries, selected_date, prev_last_entry="⚪️", universal_start_min=None):
-    timeline = ["⚪️"] * MINUTES_IN_DAY
-    entries_sorted = sorted(entries, key=lambda e: parse_datetime_safe(e["time"]) if e.get("time") else datetime.min)
-    for i, entry in enumerate(entries_sorted):
-        if not entry.get("time"):
-            continue
-        entry_min = (parse_datetime_safe(entry["time"]) - datetime.combine(selected_date, datetime.min.time())).seconds // 60
-        if i + 1 < len(entries_sorted):
-            next_min = (parse_datetime_safe(entries_sorted[i + 1]["time"]) - datetime.combine(selected_date, datetime.min.time())).seconds // 60
+    # -----------------------------
+    # Plot timeline with "None" support
+    # -----------------------------
+    def plot_timeline_matplotlib(timeline, symptom, fig_height=1):
+        if not timeline:
+            timeline = ["None"]
+        arr_rgb = np.array([[COLOR_MAP.get(normalize_emoji(s), (0,0,0)) for s in timeline]])
+        fig, ax = plt.subplots(figsize=(12, fig_height))
+        ax.imshow(arr_rgb, aspect='auto')
+        ax.set_yticks([])
+        max_min = len(timeline)
+        xticks = [i*60 for i in range(25) if i*60 <= max_min]
+        xticklabels = [(h % 12) or 12 for h in range(len(xticks))]
+        ax.set_xticks(xticks)
+        ax.set_xticklabels(xticklabels)
+        ax.set_title(symptom, fontsize=10)
+        ax.set_facecolor("lightgray")
+        st.pyplot(fig)
+        plt.close(fig)
+
+    # -----------------------------
+    # Session log cache for per-day logs (fast, in-memory)
+    # -----------------------------
+    def get_log(date):
+        if "cached_logs" not in st.session_state:
+            st.session_state.cached_logs = {}
+        key = date.strftime("%Y-%m-%d")
+        if key not in st.session_state.cached_logs:
+            log = load_log(date) or {}
+            st.session_state.cached_logs[key] = log
+        return st.session_state.cached_logs[key]
+
+    def refresh_data():
+        st.session_state.pop("cached_logs", None)
+        st.session_state.pop("all_lists", None)
+
+    st.sidebar.button("🔄 Refresh Data", on_click=refresh_data)
+
+    # -----------------------------
+    # UI: Date selection and navigation
+    # -----------------------------
+    if "selected_date" not in st.session_state:
+        now = datetime.now()
+        if 0 <= now.hour < 4:
+            st.session_state.selected_date = date.today() - timedelta(days=1)
         else:
-            next_min = MINUTES_IN_DAY
-        entry_min = max(0, min(entry_min, MINUTES_IN_DAY))
-        next_min = max(0, min(next_min, MINUTES_IN_DAY))
-        if next_min > entry_min:
-            timeline[entry_min:next_min] = [entry.get("severity", "⚪️")] * (next_min - entry_min)
-    for i in range(0, 3*60):
-        if timeline[i] == "⚪️":
-            timeline[i] = prev_last_entry
-    timeline[3*60] = "None"
-    if universal_start_min is None:
-        post_3am_entries = [
-            e for e in entries_sorted
-            if e.get("time") and (parse_datetime_safe(e["time"]) - datetime.combine(selected_date, datetime.min.time())).seconds // 60 > 3*60
-        ]
-        if post_3am_entries:
-            universal_start_dt = min(parse_datetime_safe(e["time"]) for e in post_3am_entries)
-            universal_start_min = (universal_start_dt - datetime.combine(selected_date, datetime.min.time())).seconds // 60
+            st.session_state.selected_date = date.today()
+
+    def go_prev_day():
+        st.session_state.selected_date -= timedelta(days=1)
+
+    def go_next_day():
+        st.session_state.selected_date += timedelta(days=1)
+
+    def go_today():
+        now = datetime.now()
+        if 0 <= now.hour < 4:
+            st.session_state.selected_date = date.today() - timedelta(days=1)
         else:
-            universal_start_min = 3*60 + 1
-    for i in range(3*60 + 1, universal_start_min):
-        if i < MINUTES_IN_DAY:
-            timeline[i] = "None"
-    last_known = timeline[universal_start_min] if universal_start_min < MINUTES_IN_DAY else "⚪️"
-    for i in range(universal_start_min, MINUTES_IN_DAY):
-        if timeline[i] not in ["None"]:
-            last_known = timeline[i]
-        else:
-            timeline[i] = last_known
-    now = datetime.now()
-    if selected_date == now.date():
-        timeline = timeline[:now.hour*60 + now.minute]
-    return timeline
+            st.session_state.selected_date = date.today()
 
-# -----------------------------
-# Plot timeline with "None" support
-# -----------------------------
-def plot_timeline_matplotlib(timeline, symptom, fig_height=1):
-    if not timeline:
-        timeline = ["None"]
-    arr_rgb = np.array([[COLOR_MAP.get(normalize_emoji(s), (0,0,0)) for s in timeline]])
-    fig, ax = plt.subplots(figsize=(12, fig_height))
-    ax.imshow(arr_rgb, aspect='auto')
-    ax.set_yticks([])
-    max_min = len(timeline)
-    xticks = [i*60 for i in range(25) if i*60 <= max_min]
-    xticklabels = [(h % 12) or 12 for h in range(len(xticks))]
-    ax.set_xticks(xticks)
-    ax.set_xticklabels(xticklabels)
-    ax.set_title(symptom, fontsize=10)
-    ax.set_facecolor("lightgray")
-    st.pyplot(fig)
-    plt.close(fig)
+    col1, col2, col3 = st.columns([1,1,1])
+    with col1: st.button("⬅️ Previous", on_click=go_prev_day)
+    with col2: st.button("📅 Today", on_click=go_today)
+    with col3:
+        if st.session_state.selected_date < date.today():
+            st.button("Next ➡️", on_click=go_next_day)
 
-# -----------------------------
-# Session log cache for per-day logs (fast, in-memory)
-# -----------------------------
-def get_log(date):
-    if "cached_logs" not in st.session_state:
-        st.session_state.cached_logs = {}
-    key = date.strftime("%Y-%m-%d")
-    if key not in st.session_state.cached_logs:
-        log = load_log(date) or {}
-        st.session_state.cached_logs[key] = log
-    return st.session_state.cached_logs[key]
-
-def refresh_data():
-    st.session_state.pop("cached_logs", None)
-    st.session_state.pop("all_lists", None)
-
-st.sidebar.button("🔄 Refresh Data", on_click=refresh_data)
-
-# -----------------------------
-# UI: Date selection and navigation
-# -----------------------------
-if "selected_date" not in st.session_state:
-    now = datetime.now()
-    if 0 <= now.hour < 4:
-        st.session_state.selected_date = date.today() - timedelta(days=1)
-    else:
-        st.session_state.selected_date = date.today()
-
-def go_prev_day():
-    st.session_state.selected_date -= timedelta(days=1)
-
-def go_next_day():
-    st.session_state.selected_date += timedelta(days=1)
-
-def go_today():
-    now = datetime.now()
-    if 0 <= now.hour < 4:
-        st.session_state.selected_date = date.today() - timedelta(days=1)
-    else:
-        st.session_state.selected_date = date.today()
-
-col1, col2, col3 = st.columns([1,1,1])
-with col1: st.button("⬅️ Previous", on_click=go_prev_day)
-with col2: st.button("📅 Today", on_click=go_today)
-with col3:
-    if st.session_state.selected_date < date.today():
-        st.button("Next ➡️", on_click=go_next_day)
-
-selected_date = st.date_input("Pick a date", key="selected_date")
+    selected_date = st.date_input("Pick a date", key="selected_date")
 
 # -----------------------------
 # Symptoms Section (unchanged)
@@ -1336,3 +1270,38 @@ if st.button("Update Combined Excel"):
 
     st.success("✅ Combined Excel updated in Dropbox")
 
+# --- View Data Page ---
+def view_data_page():
+    st.header("View Data")
+    subpage = st.selectbox(
+        "Select sub-page:",
+        ["Symptoms", "Heart Rate", "Sleep", "Nutrition", "Activity", "Other"]
+    )
+    if subpage == "Symptoms":
+        st.info("Symptoms data view coming soon.")
+    elif subpage == "Heart Rate":
+        st.info("Heart rate data view coming soon.")
+    elif subpage == "Sleep":
+        st.info("Sleep data view coming soon.")
+    elif subpage == "Nutrition":
+        st.info("Nutrition data view coming soon.")
+    elif subpage == "Activity":
+        st.info("Activity data view coming soon.")
+    elif subpage == "Other":
+        st.info("Other data views coming soon.")
+
+# --- Correlations Page ---
+def correlations_page():
+    st.header("Correlations")
+    st.info("Correlation analysis coming soon.")
+
+# --- Sidebar Navigation ---
+PAGES = {
+    "Validate Logs": validate_logs_page,
+    "View Data": view_data_page,
+    "Correlations": correlations_page
+}
+
+st.sidebar.title("Navigation")
+selection = st.sidebar.radio("Go to:", list(PAGES.keys()))
+PAGES[selection]()
