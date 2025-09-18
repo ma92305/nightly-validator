@@ -33,6 +33,9 @@ def load_all_data(path):
 data = load_all_data(EXCEL_PATH)
 symptoms_df = data.get("Symptoms", pd.DataFrame())
 
+if not symptoms_df.empty and "time" in symptoms_df.columns:
+    symptoms_df["time"] = pd.to_datetime(symptoms_df["time"], errors="coerce")
+
 def validate_logs_page():
     
     # -----------------------------
