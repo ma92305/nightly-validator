@@ -11,6 +11,7 @@ from excel_updater import update_combined_excel
 from symptoms_page import symptoms_page
 import importlib
 import excel_updater
+import pandas as pd
 
 importlib.reload(excel_updater)
 
