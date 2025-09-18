@@ -359,17 +359,17 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
                     df_cond["category"] = ""
                 df_cond["category"] = df_cond["category"].astype(str).str.lower()
 
-                # --- FIX: Add only non-activity, non-special items to the conditions sheet (REMOVE category column)
+                # --- FIX: Add only non-activity, non-special items to the conditions sheet (REMOVE status & category columns)
                 conditions_mask = ~df_cond["category"].isin(["activities"]) & ~df_cond["item"].str.lower().isin(["stairs", "🧍prolonged standing", "walking"])
                 df_conditions_only = df_cond[conditions_mask].copy()
                 if not df_conditions_only.empty:
-                    df_conditions_only = df_conditions_only.drop(columns=["category"], errors="ignore")
+                    df_conditions_only = df_conditions_only.drop(columns=["category", "status"], errors="ignore")
                     sheets["conditions"].append(df_conditions_only.sort_values("time", ascending=False))
 
-                # Activities / Locations (keep status, drop quantity)
+                # Activities / Locations (keep status, drop quantity & category)
                 df_activities = df_cond[df_cond["category"] == "activities"].copy()
                 if not df_activities.empty:
-                    df_activities = df_activities.drop(columns=["quantity"], errors="ignore")
+                    df_activities = df_activities.drop(columns=["quantity", "category"], errors="ignore")
                     sheets["activities"].append(df_activities.sort_values("time", ascending=False))
 
                 # Stairs (keep quantity, drop status)
@@ -389,7 +389,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
                 if not df_walking.empty:
                     df_walking = df_walking.drop(columns=["quantity"], errors="ignore")
                     sheets["walking"].append(df_walking.sort_values("time", ascending=False))
-
+        
         activity = data.get("activity_entries", {})
 
         # Stairs
