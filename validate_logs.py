@@ -13,6 +13,73 @@ import excel_updater
 
 importlib.reload(excel_updater)
 
+import streamlit as st
+
+# --- Main Pages ---
+def validate_logs_page():
+    st.header("Validate Logs")
+    # All your existing code for log validation goes here.
+    # (Move your current Streamlit UI blocks here.)
+
+def symptoms_page():
+    st.subheader("Symptoms Data")
+    st.info("Symptoms data page coming soon.")
+
+def hr_page():
+    st.subheader("Heart Rate Data")
+    st.info("Heart rate page coming soon.")
+
+def sleep_page():
+    st.subheader("Sleep Data")
+    st.info("Sleep data page coming soon.")
+
+def nutrition_page():
+    st.subheader("Nutrition Data")
+    st.info("Nutrition data page coming soon.")
+
+def weather_page():
+    st.subheader("Weather Data")
+    st.info("Weather page coming soon.")
+
+def conditions_page():
+    st.subheader("Conditions Data")
+    st.info("Conditions page coming soon.")
+
+def correlation_page():
+    st.subheader("Correlations")
+    st.info("Correlation analysis coming soon.")
+
+def view_data_page():
+    st.header("View Data")
+    subpage = st.selectbox("Select sub-page:", ["Symptoms", "Heart Rate", "Sleep", "Nutrition", "Activity", "Other"])
+    if subpage == "Symptoms":
+        symptoms_page()
+    elif subpage == "Heart Rate":
+        hr_page()
+    elif subpage == "Sleep":
+        sleep_page()
+    elif subpage == "Nutrition":
+        nutrition_page()
+    elif subpage == "Activity":
+        st.info("Activity page coming soon.")
+    elif subpage == "Other":
+        weather_page()
+        conditions_page()
+
+def correlations_page():
+    correlation_page()  # Existing function
+
+# --- Sidebar Navigation ---
+PAGES = {
+    "Validate Logs": validate_logs_page,
+    "View Data": view_data_page,
+    "Correlations": correlations_page
+}
+
+st.sidebar.title("Navigation")
+selection = st.sidebar.radio("Go to:", list(PAGES.keys()))
+PAGES[selection]()
+
 # -----------------------------
 # Config
 # -----------------------------
