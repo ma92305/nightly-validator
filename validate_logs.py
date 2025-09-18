@@ -1207,6 +1207,32 @@ with st.expander("Meds", expanded=False):
         st.error("all_lists.json not found in Dropbox/HealthLogs!")
 
     # -----------------------------
+    # Helper: Add missing morning/night as skipped (for UI only, not written to file until save)
+    # -----------------------------
+    def get_missing_meds_as_skipped(med_entries, all_lists):
+        existing = set((m['name'], m['emoji']) for m in med_entries)
+        missing = []
+        for group_key in ["morning_med", "night_med"]:
+            for med_str in all_lists.get(group_key, []):
+                med = json.loads(med_str)
+                med_id = (med["name"], med["emoji"])
+                if med_id not in existing:
+                    missing.append({
+                        "status": "skipped",
+                        "emoji": med["emoji"],
+                        "name": med["name"],
+                        "dose": med.get("dose", ""),
+                        "time_taken": "",
+                    })
+        return missing
+
+    # For UI: show real + virtual-skipped meds (virtual only in UI until Save)
+    virtual_skipped_meds = []
+    if all_lists:
+        virtual_skipped_meds = get_missing_meds_as_skipped(st.session_state.med, all_lists)
+    display_meds = st.session_state.med + virtual_skipped_meds
+
+    # -----------------------------
     # Add / Remove / Reset buttons
     # -----------------------------
     col_add, col_remove, col_reset = st.columns(3)
@@ -1346,14 +1372,32 @@ with st.expander("Meds", expanded=False):
         else:
             st.markdown("_No entries_")
 
-    render_med_list("Current Entries", st.session_state.med)
+    render_med_list("Current Entries", display_meds)
 
     # -----------------------------
     # Save & Validate Medications
     # -----------------------------
     if st.button("✅ Save & Validate Medications"):
         data = st.session_state.data
-        data["med_entries"] = st.session_state.med.copy()
+
+        # When saving: combine real + virtual-skipped for file write (no special flags)
+        save_meds = st.session_state.med.copy()
+        # Add missing skipped entries again (if still absent)
+        existing = set((m['name'], m['emoji']) for m in save_meds)
+        for group_key in ["morning_med", "night_med"]:
+            for med_str in all_lists.get(group_key, []) if all_lists else []:
+                med = json.loads(med_str)
+                med_id = (med["name"], med["emoji"])
+                if med_id not in existing:
+                    save_meds.append({
+                        "status": "skipped",
+                        "emoji": med["emoji"],
+                        "name": med["name"],
+                        "dose": med.get("dose", ""),
+                        "time_taken": "",
+                    })
+
+        data["med_entries"] = save_meds
 
         # Ensure validated_entries works even if [{}] or {}
         if "validated_entries" not in data or not data["validated_entries"] or data["validated_entries"] == [{}]:
@@ -1383,6 +1427,8 @@ with st.expander("Meds", expanded=False):
         save_log(selected_date, data)
         st.success("✅ Medication entries saved and validated!")
 
+        # inside your app
+        update_combined_excel(dbx, DROPBOX_FOLDER)
         # inside your app
         update_combined_excel(dbx, DROPBOX_FOLDER)
 
