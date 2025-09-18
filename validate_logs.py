@@ -18,7 +18,7 @@ importlib.reload(excel_updater)
 # -----------------------------
 st.set_page_config(
     page_title="Nightly Validator",
-    page_icon="favicon.png",  # can also use an emoji like "🩺"
+    page_icon="favicon.png",
 )
 
 dbx = dropbox.Dropbox(
@@ -27,7 +27,7 @@ dbx = dropbox.Dropbox(
     app_secret=st.secrets["dropbox_app_secret"]
 )
 
-DROPBOX_FOLDER = "/HealthLogs"  # your folder in Dropbox
+DROPBOX_FOLDER = "/HealthLogs"
 
 SEVERITIES = ["None", "⚪️", "🟡", "🟠", "🔴", "🟣"]
 
@@ -55,10 +55,9 @@ def get_all_lists_cached():
         return {}
 
 # -----------------------------
-# Dropbox Helpers (define first)
+# Dropbox Helpers
 # -----------------------------
 def dropbox_read_json(filename):
-    """Read JSON file from Dropbox HealthLogs folder (for non-cached use)"""
     path = f"{DROPBOX_FOLDER}/{filename}"
     try:
         md, res = dbx.files_download(path)
@@ -69,7 +68,6 @@ def dropbox_read_json(filename):
         return {}
 
 def dropbox_write_json(filename, data):
-    """Write JSON file to Dropbox HealthLogs folder"""
     path = f"{DROPBOX_FOLDER}/{filename}"
     dbx.files_upload(
         json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode("utf-8"),
@@ -105,7 +103,7 @@ CONDITION_OPTIONS = st.session_state.all_lists.get("conditions", [])
 AMOUNT_OPTIONS = ["A little", "Some", "Moderate", "A lot"]
 
 # -----------------------------
-# Utils (no changes, for speed they're fine)
+# Utils
 # -----------------------------
 def normalize_emoji(s):
     if not isinstance(s, str):
@@ -160,6 +158,72 @@ def restore_emojis_and_times(obj):
     return obj
 
 # -----------------------------
+# Build minute timeline (helper for symptoms)
+# -----------------------------
+def build_minute_timeline(entries, selected_date, prev_last_entry="⚪️", universal_start_min=None):
+    timeline = ["⚪️"] * MINUTES_IN_DAY
+    entries_sorted = sorted(entries, key=lambda e: parse_datetime_safe(e["time"]) if e.get("time") else datetime.min)
+    for i, entry in enumerate(entries_sorted):
+        if not entry.get("time"):
+            continue
+        entry_min = (parse_datetime_safe(entry["time"]) - datetime.combine(selected_date, datetime.min.time())).seconds // 60
+        if i + 1 < len(entries_sorted):
+            next_min = (parse_datetime_safe(entries_sorted[i + 1]["time"]) - datetime.combine(selected_date, datetime.min.time())).seconds // 60
+        else:
+            next_min = MINUTES_IN_DAY
+        entry_min = max(0, min(entry_min, MINUTES_IN_DAY))
+        next_min = max(0, min(next_min, MINUTES_IN_DAY))
+        if next_min > entry_min:
+            timeline[entry_min:next_min] = [entry.get("severity", "⚪️")] * (next_min - entry_min)
+    for i in range(0, 3*60):
+        if timeline[i] == "⚪️":
+            timeline[i] = prev_last_entry
+    timeline[3*60] = "None"
+    if universal_start_min is None:
+        post_3am_entries = [
+            e for e in entries_sorted
+            if e.get("time") and (parse_datetime_safe(e["time"]) - datetime.combine(selected_date, datetime.min.time())).seconds // 60 > 3*60
+        ]
+        if post_3am_entries:
+            universal_start_dt = min(parse_datetime_safe(e["time"]) for e in post_3am_entries)
+            universal_start_min = (universal_start_dt - datetime.combine(selected_date, datetime.min.time())).seconds // 60
+        else:
+            universal_start_min = 3*60 + 1
+    for i in range(3*60 + 1, universal_start_min):
+        if i < MINUTES_IN_DAY:
+            timeline[i] = "None"
+    last_known = timeline[universal_start_min] if universal_start_min < MINUTES_IN_DAY else "⚪️"
+    for i in range(universal_start_min, MINUTES_IN_DAY):
+        if timeline[i] not in ["None"]:
+            last_known = timeline[i]
+        else:
+            timeline[i] = last_known
+    now = datetime.now()
+    if selected_date == now.date():
+        timeline = timeline[:now.hour*60 + now.minute]
+    return timeline
+
+# -----------------------------
+# Plot timeline with "None" support
+# -----------------------------
+def plot_timeline_matplotlib(timeline, symptom, fig_height=1):
+    if not timeline:
+        timeline = ["None"]
+    arr_rgb = np.array([[COLOR_MAP.get(normalize_emoji(s), (0,0,0)) for s in timeline]])
+    fig, ax = plt.subplots(figsize=(12, fig_height))
+    ax.imshow(arr_rgb, aspect='auto')
+    ax.set_yticks([])
+    max_min = len(timeline)
+    xticks = [i*60 for i in range(25) if i*60 <= max_min]
+    xticklabels = [(h % 12) or 12 for h in range(len(xticks))]
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xticklabels)
+    ax.set_title(symptom, fontsize=10)
+    ax.set_facecolor("lightgray")
+    st.pyplot(fig)
+    plt.close(fig)
+
+# -----------------------------
 # Session log cache for per-day logs (fast, in-memory)
 # -----------------------------
 def get_log(date):
@@ -178,7 +242,7 @@ def refresh_data():
 st.sidebar.button("🔄 Refresh Data", on_click=refresh_data)
 
 # -----------------------------
-# UI: Date selection and navigation (unchanged)
+# UI: Date selection and navigation
 # -----------------------------
 if "selected_date" not in st.session_state:
     now = datetime.now()
@@ -210,18 +274,14 @@ with col3:
 selected_date = st.date_input("Pick a date", key="selected_date")
 
 # -----------------------------
-# Symptoms Section (full logic preserved)
+# Symptoms Section (unchanged)
 # -----------------------------
 with st.expander("Symptoms", expanded=False):
-
-    # Load data on date change
     if "loaded_date" not in st.session_state or st.session_state.loaded_date != selected_date:
         st.session_state.loaded_date = selected_date
         data = get_log(selected_date)
         st.session_state.data = data
         symptom_entries = data.get("symptom_entries", [])
-
-        # --- previous night last entries
         prev_date = selected_date - timedelta(days=1)
         prev_data = get_log(prev_date)
         prev_entries = prev_data.get("symptom_entries", [])
@@ -233,8 +293,6 @@ with st.expander("Symptoms", expanded=False):
                 prev_last_entry[symptom] = entries_prev_sorted[-1].get("severity", "⚪️")
             else:
                 prev_last_entry[symptom] = "⚪️"
-
-        # --- universal earliest across all symptoms (after 3AM)
         all_post_3am_entries = [
             e for e in symptom_entries
             if e.get("time") and (parse_datetime_safe(e["time"]) - datetime.combine(selected_date, datetime.min.time())).seconds // 60 > 3*60
@@ -243,8 +301,7 @@ with st.expander("Symptoms", expanded=False):
             universal_start_dt = min(parse_datetime_safe(e["time"]) for e in all_post_3am_entries)
             universal_start_min = (universal_start_dt - datetime.combine(selected_date, datetime.min.time())).seconds // 60
         else:
-            universal_start_min = 3*60 + 1  # fallback if no entries after 3AM
-
+            universal_start_min = 3*60 + 1
         st.session_state.original_timelines = {}
         for symptom in STANDARD_SYMPTOMS:
             entries = [e for e in symptom_entries if e.get("item") == symptom]
@@ -254,13 +311,10 @@ with st.expander("Symptoms", expanded=False):
                 prev_last_entry=prev_last_entry.get(symptom, "⚪️"),
                 universal_start_min=universal_start_min
             )
-
         st.session_state.timelines = {
             symptom: st.session_state.original_timelines[symptom].copy()
             for symptom in STANDARD_SYMPTOMS
         }
-
-    # --- Display each symptom
     for symptom in STANDARD_SYMPTOMS:
         col1, col2 = st.columns([4, 1])
         with col1:
@@ -268,11 +322,7 @@ with st.expander("Symptoms", expanded=False):
         with col2:
             if st.button("Edit", key=f"edit_{symptom}"):
                 st.session_state[f"expander_{symptom}"] = not st.session_state.get(f"expander_{symptom}", False)
-
-        # plot
         plot_timeline_matplotlib(st.session_state.timelines[symptom], symptom)
-
-        # Conditional editing UI
         if st.session_state.get(f"expander_{symptom}", False):
             st.markdown(f"**Edit Timeline for {symptom}**")
             col1, col2, col3 = st.columns(3)
@@ -282,74 +332,51 @@ with st.expander("Symptoms", expanded=False):
                 st.session_state[f"temp_end_{symptom}"] = 9
             if f"temp_sev_{symptom}" not in st.session_state:
                 st.session_state[f"temp_sev_{symptom}"] = "⚪️"
-
-            # --- Hour labels: 12 AM → 11 PM + midnight next day
             hour_labels = [datetime.strptime(str(h % 24), "%H").strftime("%-I %p") for h in range(24)]
-            hour_labels.append("12 AM (next day)")  # last option for next-day midnight
-
-            # --- Start time select
+            hour_labels.append("12 AM (next day)")
             start_label = col1.selectbox(
                 "Start Hour",
                 hour_labels,
                 index=st.session_state.get(f"temp_start_{symptom}", 8),
                 key=f"input_start_{symptom}"
             )
-
-            # --- End time select
             end_label = col2.selectbox(
                 "End Hour",
                 hour_labels,
                 index=st.session_state.get(f"temp_end_{symptom}", 9),
                 key=f"input_end_{symptom}"
             )
-
-            # --- Map labels → hours
             start_hour = datetime.strptime(start_label, "%I %p").hour
             if end_label == "12 AM (next day)":
                 end_hour = 24
             else:
                 end_hour = datetime.strptime(end_label, "%I %p").hour
-
-            # --- Construct datetimes
             start_dt = datetime.combine(selected_date, datetime.min.time()) + timedelta(hours=start_hour)
             if end_hour == 24:
                 end_dt = datetime.combine(selected_date + timedelta(days=1), datetime.min.time())
             else:
                 end_dt = datetime.combine(selected_date, datetime.min.time()) + timedelta(hours=end_hour)
-
-            # --- Severity select
             severity = col3.selectbox(
                 "Severity",
                 SEVERITIES,
                 index=SEVERITIES.index(st.session_state.get(f"temp_sev_{symptom}", "⚪️")),
                 key=f"input_sev_{symptom}"
             )
-
-            # --- Save temporary values
             st.session_state[f"temp_start_{symptom}"] = hour_labels.index(start_label)
             st.session_state[f"temp_end_{symptom}"] = hour_labels.index(end_label)
             st.session_state[f"temp_sev_{symptom}"] = severity
-
-            # --- Save Change button
             if st.button(f"Save Change - {symptom}", key=f"save_change_{symptom}"):
-                # Compute timeline minutes
                 start_min = int((start_dt - datetime.combine(selected_date, datetime.min.time())).total_seconds() // 60)
                 end_min = int((end_dt - datetime.combine(selected_date, datetime.min.time())).total_seconds() // 60)
-                end_min_timeline = min(end_min, MINUTES_IN_DAY)  # clip to 1440
-
-                # Apply severity
+                end_min_timeline = min(end_min, MINUTES_IN_DAY)
                 st.session_state.timelines[symptom][start_min:end_min_timeline] = [severity] * (end_min_timeline - start_min)
-
                 st.success("Timeline updated in place.")
                 st.session_state[f"expander_{symptom}"] = False
                 st.rerun()
-
             if st.button(f"Reset Timeline - {symptom}", key=f"reset_{symptom}"):
                 st.session_state.timelines[symptom] = st.session_state.original_timelines[symptom].copy()
                 st.success("Timeline reset to original file data.")
                 st.rerun()
-
-    # Event Timeline
     st.markdown("### Event Timeline")
     event_entries = [
         e for e in st.session_state.data.get("symptom_entries", [])
@@ -362,18 +389,12 @@ with st.expander("Symptoms", expanded=False):
             st.markdown(f"{entry_time} - {entry['item']}")
     else:
         st.markdown("_No events recorded for this day_")
-
-    # -----------------------------
-    # Editable Event Section (12-hour + 15 min increments)
-    # -----------------------------
     with st.expander("Edit Events", expanded=False):
         data = st.session_state.data
         event_entries = [
             e for e in data.get("symptom_entries", [])
             if e.get("category", "").lower() == "event"
         ]
-
-        # --- Remove existing events
         st.markdown("#### Existing Events")
         for i, entry in enumerate(event_entries):
             entry_time = parse_datetime_safe(entry["time"]).strftime("%-I:%M %p")
@@ -382,21 +403,16 @@ with st.expander("Symptoms", expanded=False):
                 st.markdown(f"{entry_time} - {entry['item']}")
             with col2:
                 if st.button("Remove", key=f"remove_event_{i}"):
-                    # Remove from symptom_entries
                     data["symptom_entries"] = [
-                        e for e in data.get("symptom_entries", [])
+                        e for e in data["symptom_entries"]
                         if not (e.get("item") == entry["item"] and e.get("time") == entry["time"])
                     ]
                     st.session_state.data = data
                     st.success(f"Removed event: {entry['item']} at {entry_time}")
                     st.rerun()
-
-        # --- Add new event
         st.markdown("#### Add New Event")
         all_events = st.session_state.all_lists.get("events", [])
         new_event_item = st.selectbox("Select Event", all_events, key="new_event_item")
-
-        # --- 12-hour time inputs with 15-min increments
         col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
             hour = st.selectbox("Hour", list(range(1, 13)), key="new_event_hour")
@@ -404,8 +420,6 @@ with st.expander("Symptoms", expanded=False):
             minute = st.selectbox("Minute", [0, 15, 30, 45], key="new_event_minute")
         with col3:
             ampm = st.selectbox("AM/PM", ["AM", "PM"], key="new_event_ampm")
-
-        # --- Compute datetime
         if ampm == "PM" and hour != 12:
             hour_24 = hour + 12
         elif ampm == "AM" and hour == 12:
@@ -413,7 +427,6 @@ with st.expander("Symptoms", expanded=False):
         else:
             hour_24 = hour
         new_event_dt = datetime.combine(selected_date, datetime.min.time()) + timedelta(hours=hour_24, minutes=minute)
-
         if st.button("Add Event"):
             new_entry = {
                 "item": new_event_item,
@@ -424,12 +437,8 @@ with st.expander("Symptoms", expanded=False):
             st.session_state.data = data
             st.success(f"Added event: {new_event_item} at {new_event_dt.strftime('%-I:%M %p')}")
             st.rerun()
-    
-    # Symptom-only Validate
     if st.button("✅ Validate & Upload Symptoms Only"):
         data = st.session_state.data
-
-        # --- Sync edited timelines into data first
         new_entries_all = []
         for symptom in STANDARD_SYMPTOMS:
             timeline = st.session_state.timelines[symptom]
@@ -451,15 +460,11 @@ with st.expander("Symptoms", expanded=False):
                 "time": dt.strftime("%b %-d, %Y at %-I:%M %p"),
                 "severity": last_sev
             })
-
-        # Preserve events
         event_entries = [
             e for e in data.get("symptom_entries", [])
             if e.get("category", "").lower() == "event"
         ]
         data["symptom_entries"] = new_entries_all + event_entries
-
-        # previous night last entries
         prev_date = selected_date - timedelta(days=1)
         prev_data = get_log(prev_date)
         prev_entries = prev_data.get("symptom_entries", [])
@@ -471,8 +476,6 @@ with st.expander("Symptoms", expanded=False):
                 prev_last_entry[symptom] = entries_prev_sorted[-1].get("severity", "⚪️")
             else:
                 prev_last_entry[symptom] = "⚪️"
-
-        # universal earliest across all symptoms after 3AM
         symptom_entries = data.get("symptom_entries", [])
         all_post_3am_entries = [
             e for e in symptom_entries
@@ -482,30 +485,21 @@ with st.expander("Symptoms", expanded=False):
             universal_earliest = min(parse_datetime_safe(e["time"]) for e in all_post_3am_entries)
             universal_earliest_min = (universal_earliest - datetime.combine(selected_date, datetime.min.time())).seconds // 60
         else:
-            universal_earliest_min = 3*60  # fallback
-
+            universal_earliest_min = 3*60
         for symptom in STANDARD_SYMPTOMS:
             timeline = st.session_state.timelines[symptom]
-
-            # Midnight → 3AM: fill only None minutes with previous night value
             for i in range(0, min(3*60, len(timeline))):
                 if timeline[i] == "None":
                     timeline[i] = prev_last_entry.get(symptom, "⚪️")
-
-            # 3AM → universal earliest: fill only None minutes
             for i in range(3*60, min(universal_earliest_min, len(timeline))):
                 if timeline[i] == "None":
                     timeline[i] = "None"
-
-            # Universal earliest → rest of timeline: carry forward last known value
             last_known = prev_last_entry.get(symptom, "⚪️")
             for i in range(universal_earliest_min, len(timeline)):
                 if timeline[i] != "None":
                     last_known = timeline[i]
                 elif last_known:
                     timeline[i] = last_known
-
-        # Update validated_entries
         if "validated_entries" not in data or not data["validated_entries"]:
             data["validated_entries"] = [{
                 "symptoms_valid": "true",
@@ -516,11 +510,8 @@ with st.expander("Symptoms", expanded=False):
             }]
         else:
             data["validated_entries"][0]["symptoms_valid"] = "true"
-
         save_log(selected_date, data)
         st.success("✅ Symptom timelines validated & uploaded!")
-        
-        # inside your app
         update_combined_excel(dbx, DROPBOX_FOLDER)
 
 # -----------------------------
