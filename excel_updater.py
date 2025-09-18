@@ -54,6 +54,17 @@ def clean_entries(entries, required_fields=None):
         cleaned.append(entry)
     return cleaned
 
+def parse_activity_list(value):
+    """Parse an activity_entries subkey safely with rules for None/missing."""
+    if not value:
+        return None
+    if value == "None" or value == ["None"]:
+        return "None"
+    try:
+        return [json.loads(x) for x in value.split("\n")]
+    except Exception:
+        return None
+
 def parse_tachy_events(tachy_input):
     keys = ["event_start_epoch", "event_end_epoch", "event_start", "event_end", "duration_seconds", "max_bpm"]
     events = {k: [] for k in keys}
@@ -104,7 +115,7 @@ def parse_tachy_events(tachy_input):
         print("⚠️ Error parsing tachy events:", e)
 
     return events
-    
+
 def extract_weather_stats(weather_entries):
     temperature = weather_entries.get("temperature", {})
     humidity = weather_entries.get("humidity", {})
@@ -312,7 +323,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
 
                 df_hourly['File'] = filename
                 sheets["hourly_weather"].append(df_hourly)
-        
+
         # --- SYMPTOMS ---
         if val_dict.get("symptoms_valid", False):
             symptoms = clean_entries(data.get("symptom_entries", []), required_fields=["item", "time"])
@@ -334,43 +345,114 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
                     df_events["File"] = filename
                     sheets["symptom_events"].append(df_events.sort_values("time", ascending=False))
 
-        # --- CONDITIONS & ACTIVITIES (Locations) ---
+        # --- CONDITIONS & ACTIVITIES (Locations + Activity Entries) ---
         if val_dict.get("conditions_valid", False):
-                cond_entries = clean_entries(
-                        data.get("condition_entries", []),
-                        required_fields=["item","time"]
-                )
-                if cond_entries:
-                        df_cond = pd.DataFrame(cond_entries)
-                        df_cond["time"] = pd.to_datetime(df_cond["time"], errors='coerce')
-                        df_cond["File"] = filename
-                        if "category" not in df_cond.columns:
-                                df_cond["category"] = ""
-                        df_cond["category"] = df_cond["category"].astype(str).str.lower()
+            cond_entries = clean_entries(
+                data.get("condition_entries", []),
+                required_fields=["item","time"]
+            )
+            if cond_entries:
+                df_cond = pd.DataFrame(cond_entries)
+                df_cond["time"] = pd.to_datetime(df_cond["time"], errors='coerce')
+                df_cond["File"] = filename
+                if "category" not in df_cond.columns:
+                    df_cond["category"] = ""
+                df_cond["category"] = df_cond["category"].astype(str).str.lower()
 
-                        # Activities / Locations (keep status, drop quantity)
-                        df_activities = df_cond[df_cond["category"] == "activities"].copy()
-                        if not df_activities.empty:
-                                df_activities = df_activities.drop(columns=["quantity"], errors="ignore")
-                                sheets["activities"].append(df_activities.sort_values("time", ascending=False))
+                # Activities / Locations (keep status, drop quantity)
+                df_activities = df_cond[df_cond["category"] == "activities"].copy()
+                if not df_activities.empty:
+                    df_activities = df_activities.drop(columns=["quantity"], errors="ignore")
+                    sheets["activities"].append(df_activities.sort_values("time", ascending=False))
 
-                        # Stairs (keep quantity, drop status)
-                        df_stairs = df_cond[df_cond["item"].str.lower() == "stairs"].copy()
-                        if not df_stairs.empty:
-                                df_stairs = df_stairs.drop(columns=["status"], errors="ignore")
-                                sheets["stairs"].append(df_stairs.sort_values("time", ascending=False))
+                # Stairs (keep quantity, drop status)
+                df_stairs = df_cond[df_cond["item"].str.lower() == "stairs"].copy()
+                if not df_stairs.empty:
+                    df_stairs = df_stairs.drop(columns=["status"], errors="ignore")
+                    sheets["stairs"].append(df_stairs.sort_values("time", ascending=False))
 
-                        # Prolonged standing (keep status, drop quantity)
-                        df_standing = df_cond[df_cond["item"].str.lower() == "🧍prolonged standing"].copy()
-                        if not df_standing.empty:
-                                df_standing = df_standing.drop(columns=["quantity"], errors="ignore")
-                                sheets["standing"].append(df_standing.sort_values("time", ascending=False))
+                # Prolonged standing (keep status, drop quantity)
+                df_standing = df_cond[df_cond["item"].str.lower() == "🧍prolonged standing"].copy()
+                if not df_standing.empty:
+                    df_standing = df_standing.drop(columns=["quantity"], errors="ignore")
+                    sheets["standing"].append(df_standing.sort_values("time", ascending=False))
 
-                        # Walking (keep status, drop quantity)
-                        df_walking = df_cond[df_cond["item"].str.lower() == "walking"].copy()
-                        if not df_walking.empty:
-                                df_walking = df_walking.drop(columns=["quantity"], errors="ignore")
-                                sheets["walking"].append(df_walking.sort_values("time", ascending=False))
+                # Walking (keep status, drop quantity)
+                df_walking = df_cond[df_cond["item"].str.lower() == "walking"].copy()
+                if not df_walking.empty:
+                    df_walking = df_walking.drop(columns=["quantity"], errors="ignore")
+                    sheets["walking"].append(df_walking.sort_values("time", ascending=False))
+
+        activity = data.get("activity_entries", {})
+
+        # Stairs
+        stair_list = parse_activity_list(activity.get("stair_list"))
+        stair_date = file_date
+        if stair_list is None:
+            sheets["stairs"].append(pd.DataFrame([{"Date": stair_date}]))
+        elif stair_list == "None":
+            sheets["stairs"].append(pd.DataFrame([{
+                "Date": stair_date,
+                "Quantity": "None",
+                "Time": "None",
+                "Item": "None",
+            }]))
+        else:
+            df_stairs = pd.DataFrame([{
+                "Date": stair_date,
+                "Quantity": e.get("quantity"),
+                "Time": e.get("time"),
+                "Item": e.get("item"),
+            } for e in stair_list])
+            sheets["stairs"].append(df_stairs)
+
+        # Standing
+        stand_list = parse_activity_list(activity.get("stand_list"))
+        stand_date = file_date
+        if stand_list is None:
+            sheets["standing"].append(pd.DataFrame([{"Date": stand_date}]))
+        elif stand_list == "None":
+            sheets["standing"].append(pd.DataFrame([{
+                "Date": stand_date,
+                "Duration": "None",
+                "Start_time": "None",
+                "End_time": "None",
+                "Item": "None",
+            }]))
+        else:
+            df_standing = pd.DataFrame([{
+                "Date": stand_date,
+                "Duration": e.get("duration"),
+                "Start_time": e.get("start_time"),
+                "End_time": e.get("end_time"),
+                "Item": e.get("item"),
+            } for e in stand_list])
+            sheets["standing"].append(df_standing)
+
+        # Walking
+        walk_list = parse_activity_list(activity.get("walk_list"))
+        walk_date = file_date
+        if walk_list is None:
+            sheets["walking"].append(pd.DataFrame([{"Date": walk_date}]))
+        elif walk_list == "None":
+            sheets["walking"].append(pd.DataFrame([{
+                "Date": walk_date,
+                "Steps/min": "None",
+                "Steps": "None",
+                "Start_time": "None",
+                "End_time": "None",
+                "Item": "None",
+            }]))
+        else:
+            df_walking = pd.DataFrame([{
+                "Date": walk_date,
+                "Steps/min": e.get("steps/min"),
+                "Steps": e.get("steps"),
+                "Start_time": e.get("start_time"),
+                "End_time": e.get("end_time"),
+                "Item": e.get("item"),
+            } for e in walk_list])
+            sheets["walking"].append(df_walking)
 
         # --- NUTRITION ---
         if val_dict.get("nutrition_valid", False):
@@ -427,6 +509,8 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
             return df.sort_values("time", ascending=False, na_position="last")
         elif "date" in df.columns:
             return df.sort_values("date", ascending=False, na_position="last")
+        elif "Date" in df.columns:
+            return df.sort_values("Date", ascending=False, na_position="last")
         return df
 
     # --- Combine DataFrames ---
@@ -441,8 +525,14 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
     conditions_df_all = concat_or_empty(sheets["conditions"])
     loc_activities_df_all = concat_or_empty(sheets["activities"])
     stairs_df_all = concat_or_empty(sheets["stairs"])
+    if not stairs_df_all.empty and "Date" in stairs_df_all.columns:
+        stairs_df_all = stairs_df_all.sort_values("Date", ascending=False, na_position="last")
     standing_df_all = concat_or_empty(sheets["standing"])
+    if not standing_df_all.empty and "Date" in standing_df_all.columns:
+        standing_df_all = standing_df_all.sort_values("Date", ascending=False, na_position="last")
     walking_df_all = concat_or_empty(sheets["walking"])
+    if not walking_df_all.empty and "Date" in walking_df_all.columns:
+        walking_df_all = walking_df_all.sort_values("Date", ascending=False, na_position="last")
     nutrition_general_df = concat_or_empty(sheets["nutrition_general"])
     nutrition_meals_df = concat_or_empty(sheets["nutrition_meals"])
     nutrition_liquids_df = concat_or_empty(sheets["nutrition_liquids"])
@@ -672,7 +762,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
         meds_df_all = meds_df_all.drop(columns=["med_order"])
     else:
         meds_df_all = pd.DataFrame(columns=["File", "date", "time taken", "medication", "status", "dose", "emoji"])
-    
+
     # --- Export to Excel ---
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
@@ -740,7 +830,7 @@ def update_combined_excel(dbx, dropbox_folder_path: str, max_workers=5, force_re
                 for i, col in enumerate(df.columns):
                     max_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
                     worksheet.set_column(i, i, max_len)
-    
+
     output.seek(0)
     excel_path = f"{dropbox_folder_path}/{EXCEL_FILENAME}"
     dbx.files_upload(output.read(), excel_path, mode=dropbox.files.WriteMode.overwrite)
