@@ -104,6 +104,24 @@ def validate_logs_page():
     CONDITION_OPTIONS = st.session_state.all_lists.get("conditions", [])
     AMOUNT_OPTIONS = ["A little", "Some", "Moderate", "A lot"]
 
+    EXCEL_PATH = "/Users/melinaahmad/Library/Mobile Documents/com~apple~CloudDocs/Shortcuts/New/combined_data.xlsx"
+
+    @st.cache_data
+    def load_all_data(path):
+        sheets = pd.read_excel(path, sheet_name=None)
+        for name, df in sheets.items():
+            for col in df.columns:
+                if "time" in col.lower() or "date" in col.lower():
+                    try:
+                        df[col] = pd.to_datetime(df[col], errors="ignore")
+                    except Exception:
+                        pass
+            sheets[name] = df
+        return sheets
+
+    data = load_all_data(EXCEL_PATH)
+    symptoms_df = data.get("Symptoms", pd.DataFrame())
+    
     # -----------------------------
     # Utils
     # -----------------------------
@@ -1271,15 +1289,15 @@ def validate_logs_page():
     
         st.success("✅ Combined Excel updated in Dropbox")
 
-# --- View Data Page ---
 def view_data_page():
     st.header("View Data")
     subpage = st.selectbox(
         "Select sub-page:",
         ["Symptoms", "Heart Rate", "Sleep", "Nutrition", "Activity", "Other"]
     )
+
     if subpage == "Symptoms":
-        symptoms_page(symptoms_df)
+        symptoms_page(symptoms_df)  # <- pass the dataframe
     elif subpage == "Heart Rate":
         st.info("Heart rate data view coming soon.")
     elif subpage == "Sleep":
