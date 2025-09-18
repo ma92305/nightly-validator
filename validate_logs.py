@@ -43,28 +43,22 @@ COLOR_MAP = {
 MINUTES_IN_DAY = 24 * 60
 
 # -----------------------------
-# Refresh Button + Cached Loader
+# Aggressive caching for reference data
 # -----------------------------
-st.sidebar.button("🔄 Refresh Data", on_click=lambda: st.session_state.pop("cached_logs", None))
-
-def get_log(date):
-    """Load log for a date, but only fetch from Dropbox if not cached or if refreshed."""
-    if "cached_logs" not in st.session_state:
-        st.session_state.cached_logs = {}
-
-    key = date.strftime("%Y-%m-%d")
-
-    if key not in st.session_state.cached_logs:
-        log = load_log(date) or {}
-        st.session_state.cached_logs[key] = log
-
-    return st.session_state.cached_logs[key]
+@st.cache_data(ttl=3600, show_spinner=False)  # 1 hour cache for all_lists
+def get_all_lists_cached():
+    path = f"{DROPBOX_FOLDER}/all_lists.json"
+    try:
+        md, res = dbx.files_download(path)
+        return json.loads(res.content.decode("utf-8"))
+    except Exception:
+        return {}
 
 # -----------------------------
 # Dropbox Helpers (define first)
 # -----------------------------
 def dropbox_read_json(filename):
-    """Read JSON file from Dropbox HealthLogs folder"""
+    """Read JSON file from Dropbox HealthLogs folder (for non-cached use)"""
     path = f"{DROPBOX_FOLDER}/{filename}"
     try:
         md, res = dbx.files_download(path)
@@ -88,14 +82,8 @@ def load_log(date):
     return dropbox_read_json(filename)
 
 def save_log(date, data):
-    """
-    Save a day's JSON to Dropbox. This restores emoji/time formats
-    and sets data['validated']=True (keeps your existing behavior).
-    """
-    # Ensure we don't mutate original object passed in (copy)
-    data_to_save = json.loads(json.dumps(data))  # shallow deep-copy via JSON
+    data_to_save = json.loads(json.dumps(data))
     data_to_save["validated"] = True
-
     restored_data = restore_emojis_and_times(data_to_save)
     filename = f"health_log_{date.strftime('%Y-%m-%d')}.txt"
     dropbox_write_json(filename, restored_data)
@@ -104,7 +92,7 @@ def save_log(date, data):
 # Load reference lists ONCE (cached)
 # -----------------------------
 if "all_lists" not in st.session_state:
-    all_lists = dropbox_read_json("all_lists.json")
+    all_lists = get_all_lists_cached()
     if not all_lists:
         st.error("⚠️ all_lists.json not found in Dropbox /HealthLogs")
         all_lists = {}
@@ -117,7 +105,7 @@ CONDITION_OPTIONS = st.session_state.all_lists.get("conditions", [])
 AMOUNT_OPTIONS = ["A little", "Some", "Moderate", "A lot"]
 
 # -----------------------------
-# Utils
+# Utils (no changes, for speed they're fine)
 # -----------------------------
 def normalize_emoji(s):
     if not isinstance(s, str):
@@ -125,21 +113,19 @@ def normalize_emoji(s):
     return unicodedata.normalize("NFKC", s).strip()
 
 def parse_datetime_safe(time_str):
-    """
-    Accepts ISO dates and the custom format "<Mon> <D>, <YYYY> at <H>:<MM> <AM/PM>".
-    """
     try:
         return datetime.fromisoformat(time_str)
     except Exception:
         try:
             time_str_clean = time_str.replace("\u202f", " ")
             return datetime.strptime(time_str_clean, "%b %d, %Y at %I:%M %p")
-        except Exception as e:
-            st.error(f"Failed to parse time: {time_str}")
-            raise e
+        except Exception:
+            try:
+                return datetime.strptime(time_str, "%Y-%m-%d %H:%M")
+            except Exception:
+                return datetime.min
 
 def restore_emojis_and_times(obj):
-    """Ensure severity codes are emojis and times use the desired format."""
     if isinstance(obj, list):
         return [restore_emojis_and_times(x) for x in obj]
     elif isinstance(obj, dict):
@@ -148,7 +134,6 @@ def restore_emojis_and_times(obj):
             if k == "severity" and isinstance(v, str):
                 new_dict[k] = normalize_emoji(v)
             elif k in ("time", "time_taken") and isinstance(v, str):
-                # try parse several formats, preserve if unknown
                 dt = None
                 try:
                     dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
@@ -157,16 +142,13 @@ def restore_emojis_and_times(obj):
                         dt = datetime.strptime(v, "%b %d, %Y at %I:%M %p")
                     except Exception:
                         try:
-                            # med time format fallback
                             dt = datetime.strptime(v, "%Y-%m-%d %H:%M")
                         except Exception:
                             dt = None
                 if dt:
-                    # Format chosen to match original style
                     if k == "time_taken":
                         new_dict[k] = dt.strftime("%Y-%m-%d %H:%M")
                     else:
-                        # use same format as original files
                         new_dict[k] = dt.strftime("%b %-d, %Y at %-I:%M %p")
                 else:
                     new_dict[k] = v
@@ -178,110 +160,33 @@ def restore_emojis_and_times(obj):
     return obj
 
 # -----------------------------
-# Build minute timeline
+# Session log cache for per-day logs (fast, in-memory)
 # -----------------------------
-def build_minute_timeline(entries, selected_date, prev_last_entry="⚪️", universal_start_min=None):
-    timeline = ["⚪️"] * MINUTES_IN_DAY
+def get_log(date):
+    if "cached_logs" not in st.session_state:
+        st.session_state.cached_logs = {}
+    key = date.strftime("%Y-%m-%d")
+    if key not in st.session_state.cached_logs:
+        log = load_log(date) or {}
+        st.session_state.cached_logs[key] = log
+    return st.session_state.cached_logs[key]
 
-    # Sort entries by time (guard entries lacking time)
-    entries_sorted = sorted(entries, key=lambda e: parse_datetime_safe(e["time"]) if e.get("time") else datetime.min)
+def refresh_data():
+    st.session_state.pop("cached_logs", None)
+    st.session_state.pop("all_lists", None)
 
-    # Apply real entries first
-    for i, entry in enumerate(entries_sorted):
-        if not entry.get("time"):
-            continue
-        entry_min = (parse_datetime_safe(entry["time"]) - datetime.combine(selected_date, datetime.min.time())).seconds // 60
-        if i + 1 < len(entries_sorted):
-            next_min = (parse_datetime_safe(entries_sorted[i + 1]["time"]) - datetime.combine(selected_date, datetime.min.time())).seconds // 60
-        else:
-            next_min = MINUTES_IN_DAY
-        # guard bounds
-        entry_min = max(0, min(entry_min, MINUTES_IN_DAY))
-        next_min = max(0, min(next_min, MINUTES_IN_DAY))
-        if next_min > entry_min:
-            timeline[entry_min:next_min] = [entry.get("severity", "⚪️")] * (next_min - entry_min)
-
-    # Midnight → 3AM: carry over previous night value only if still default
-    for i in range(0, 3*60):
-        if timeline[i] == "⚪️":
-            timeline[i] = prev_last_entry
-
-    # 3AM exactly: set to "None"
-    timeline[3*60] = "None"
-
-    # Determine universal start if not provided
-    if universal_start_min is None:
-        post_3am_entries = [
-            e for e in entries_sorted
-            if e.get("time") and (parse_datetime_safe(e["time"]) - datetime.combine(selected_date, datetime.min.time())).seconds // 60 > 3*60
-        ]
-        if post_3am_entries:
-            universal_start_dt = min(parse_datetime_safe(e["time"]) for e in post_3am_entries)
-            universal_start_min = (universal_start_dt - datetime.combine(selected_date, datetime.min.time())).seconds // 60
-        else:
-            universal_start_min = 3*60 + 1  # fallback
-
-    # 3AM → universal_start: fill "None"
-    for i in range(3*60 + 1, universal_start_min):
-        if i < MINUTES_IN_DAY:
-            timeline[i] = "None"
-
-    # From universal_start onward: carry forward last known value
-    last_known = timeline[universal_start_min] if universal_start_min < MINUTES_IN_DAY else "⚪️"
-    for i in range(universal_start_min, MINUTES_IN_DAY):
-        if timeline[i] not in ["None"]:
-            last_known = timeline[i]
-        else:
-            timeline[i] = last_known
-
-    # Cut off at current time if today
-    now = datetime.now()
-    if selected_date == now.date():
-        timeline = timeline[:now.hour*60 + now.minute]
-
-    return timeline
+st.sidebar.button("🔄 Refresh Data", on_click=refresh_data)
 
 # -----------------------------
-# Plot timeline with "None" support
+# UI: Date selection and navigation (unchanged)
 # -----------------------------
-def plot_timeline_matplotlib(timeline, symptom, fig_height=1):
-    if not timeline:
-        timeline = ["None"]
-    arr_rgb = np.array([[COLOR_MAP.get(normalize_emoji(s), (0,0,0)) for s in timeline]])
-    fig, ax = plt.subplots(figsize=(12, fig_height))
-    ax.imshow(arr_rgb, aspect='auto')
-    ax.set_yticks([])
-
-    # X-axis: tick for every hour
-    max_min = len(timeline)
-    xticks = [i*60 for i in range(25) if i*60 <= max_min]  # include 24*60
-    xticklabels = [(h % 12) or 12 for h in range(len(xticks))]  # 12-hour clock
-    ax.set_xticks(xticks)
-    ax.set_xticklabels(xticklabels)
-
-    # 12-hour clock labels
-    xticklabels = [(h % 12) or 12 for h in range(len(xticks))]
-    ax.set_xticklabels(xticklabels)
-
-    ax.set_title(symptom, fontsize=10)
-    ax.set_facecolor("lightgray")
-    st.pyplot(fig)
-    plt.close(fig)
-
-# -----------------------------
-# Streamlit UI - Header / Date
-# -----------------------------
-
-# Initialize selected_date in session_state
 if "selected_date" not in st.session_state:
     now = datetime.now()
-    # If it's between 12:00 AM and 3:59 AM, default to yesterday
     if 0 <= now.hour < 4:
         st.session_state.selected_date = date.today() - timedelta(days=1)
     else:
         st.session_state.selected_date = date.today()
 
-# Navigation button handlers
 def go_prev_day():
     st.session_state.selected_date -= timedelta(days=1)
 
@@ -295,25 +200,14 @@ def go_today():
     else:
         st.session_state.selected_date = date.today()
 
-# ---- Navigation row ----
 col1, col2, col3 = st.columns([1,1,1])
-
-with col1:
-    st.button("⬅️ Previous", on_click=go_prev_day)
-
-with col2:
-    st.button("📅 Today", on_click=go_today)
-
+with col1: st.button("⬅️ Previous", on_click=go_prev_day)
+with col2: st.button("📅 Today", on_click=go_today)
 with col3:
-    # Only show next-day button if it's not in the future
     if st.session_state.selected_date < date.today():
         st.button("Next ➡️", on_click=go_next_day)
 
-# ---- Date input ----
-selected_date = st.date_input(
-    "Pick a date",
-    key="selected_date"
-)
+selected_date = st.date_input("Pick a date", key="selected_date")
 
 # -----------------------------
 # Symptoms Section (full logic preserved)
@@ -1168,34 +1062,26 @@ with st.expander("Reproductive", expanded=False):
         update_combined_excel(dbx, DROPBOX_FOLDER)
         
 # -----------------------------
-# Medication Section
+# Medications Section (with perf/caching upgrades)
 # -----------------------------
 with st.expander("Meds", expanded=False):
 
     STATUS_OPTIONS = ["taken", "skipped", "no data"]
 
-    # -----------------------------
-    # Initialize session state and load log
-    # -----------------------------
+    # Efficient session cache for meds
     if "loaded_med_date" not in st.session_state or st.session_state.loaded_med_date != selected_date:
         st.session_state.loaded_med_date = selected_date
         data = get_log(selected_date)
         st.session_state.data = data
         med_entries = data.get("med_entries", [])
         st.session_state.original_med = med_entries.copy()
-        st.session_state.med = med_entries.copy()  # initialize med session key
-
-        # Initialize UI flags
+        st.session_state.med = med_entries.copy()
         st.session_state.show_add_med = False
         st.session_state.show_remove_med = False
 
-    # -----------------------------
-    # Load all_lists.json and build MED_GROUPS
-    # -----------------------------
-
+    # Cached reference lists
+    all_lists = st.session_state.all_lists if "all_lists" in st.session_state else get_all_lists_cached()
     MED_GROUPS = {}
-    all_lists = dropbox_read_json("all_lists.json")
-
     if all_lists:
         if "morning_med" in all_lists:
             MED_GROUPS["☀️Morning Meds"] = [json.loads(med_str) for med_str in all_lists["morning_med"]]
@@ -1206,9 +1092,7 @@ with st.expander("Meds", expanded=False):
     else:
         st.error("all_lists.json not found in Dropbox/HealthLogs!")
 
-    # -----------------------------
-    # Helper: Add missing morning/night as skipped (for UI only, not written to file until save)
-    # -----------------------------
+    # Virtual skipped logic (fast, only recompute on date or med change)
     def get_missing_meds_as_skipped(med_entries, all_lists):
         existing = set((m['name'], m['emoji']) for m in med_entries)
         missing = []
@@ -1226,93 +1110,61 @@ with st.expander("Meds", expanded=False):
                     })
         return missing
 
-    # For UI: show real + virtual-skipped meds (virtual only in UI until Save)
-    virtual_skipped_meds = []
-    if all_lists:
-        virtual_skipped_meds = get_missing_meds_as_skipped(st.session_state.med, all_lists)
-    display_meds = st.session_state.med + virtual_skipped_meds
+    # Only recompute when needed
+    if "med_virtual_skipped" not in st.session_state or st.session_state.loaded_med_date != selected_date or st.session_state.med != st.session_state.original_med:
+        st.session_state.med_virtual_skipped = get_missing_meds_as_skipped(st.session_state.med, all_lists)
+    display_meds = st.session_state.med + st.session_state.med_virtual_skipped
 
-    # -----------------------------
-    # Add / Remove / Reset buttons
-    # -----------------------------
     col_add, col_remove, col_reset = st.columns(3)
-    with col_add:
-        add_clicked = st.button("Add entry", key="med_add")
-    with col_remove:
-        remove_clicked = st.button("Remove entry", key="med_remove")
-    with col_reset:
-        reset_clicked = st.button("Reset entries", key="med_reset")
+    with col_add: add_clicked = st.button("Add entry", key="med_add")
+    with col_remove: remove_clicked = st.button("Remove entry", key="med_remove")
+    with col_reset: reset_clicked = st.button("Reset entries", key="med_reset")
 
-    # -----------------------------
-    # Add Entry Section (Grouped Meds)
-    # -----------------------------
+    # --- Add Entry UI (unchanged) ---
     if add_clicked:
         st.session_state.show_add_med = True
-
     if st.session_state.get("show_add_med", False):
         st.markdown("### Add Med Entry")
-
         if MED_GROUPS:
-            # Step 1: select med group
             selected_group = st.selectbox("Select Med Group", list(MED_GROUPS.keys()), key="add_med_group")
-
-            # Step 2: select meds in that group
             group_meds = MED_GROUPS[selected_group]
-
             default_checked = "as needed" not in selected_group.lower()
             med_selections = {}
             for med in group_meds:
-                # Parse dose safely
                 dose_val = 0
                 dose_str = med.get("dose", "")
                 if dose_str:
-                    try:
-                        dose_val = float(dose_str.replace(" mg", ""))
-                    except ValueError:
-                        dose_val = 0
-
+                    try: dose_val = float(dose_str.replace(" mg", ""))
+                    except ValueError: dose_val = 0
                 label = f"{med['emoji']} {med['name']} ({dose_val} mg)" if dose_val > 0 else f"{med['emoji']} {med['name']}"
                 med_selections[med['name'] + med['emoji']] = st.checkbox(label, value=default_checked, key=f"checkbox_{med['name']}_{med['emoji']}")
-
-            # Step 3: group status
             new_status = st.selectbox("Status for this group", STATUS_OPTIONS, index=0, key="group_status")
-
-            # Step 4: group time (only if taken)
             if new_status == "taken":
                 hour_labels = [datetime.strptime(str(h), "%H").strftime("%-I %p") for h in range(0, 24)]
                 minute_labels = ["00", "15", "30", "45"]
-
                 col_hr, col_min = st.columns([1, 1])
                 with col_hr:
-                    selected_hour_label = st.selectbox("Hour", hour_labels, index=8, key="group_hour")  # default 8 AM
+                    selected_hour_label = st.selectbox("Hour", hour_labels, index=8, key="group_hour")
                 with col_min:
                     selected_minute_label = st.selectbox("Minute", minute_labels, index=0, key="group_minute")
-
                 new_hour = datetime.strptime(selected_hour_label, "%I %p").hour
                 new_minute = int(selected_minute_label)
-
             col1, col2 = st.columns([1, 1])
             with col1:
                 if st.button("Confirm Add Group", key="confirm_add_group"):
                     for med in group_meds:
                         key = med['name'] + med['emoji']
                         if med_selections[key]:
-                            entry_date = selected_date
                             entry_dt = None
                             if new_status == "taken":
                                 entry_dt = datetime.combine(selected_date, datetime.min.time()) + timedelta(
                                     hours=new_hour, minutes=new_minute
                                 )
-
-                            # Parse dose safely again for entry
                             dose_val = 0
                             dose_str = med.get("dose", "")
                             if dose_str:
-                                try:
-                                    dose_val = float(dose_str.replace(" mg", ""))
-                                except ValueError:
-                                    dose_val = 0
-
+                                try: dose_val = float(dose_str.replace(" mg", ""))
+                                except ValueError: dose_val = 0
                             entry = {
                                 "status": new_status,
                                 "emoji": med['emoji'],
@@ -1320,9 +1172,7 @@ with st.expander("Meds", expanded=False):
                                 "dose": f"{dose_val} mg" if dose_val > 0 else "",
                                 "time_taken": entry_dt.strftime("%Y-%m-%d %H:%M") if entry_dt else ""
                             }
-
                             st.session_state.med.append(entry)
-
                     st.session_state.med.sort(
                         key=lambda e: parse_datetime_safe(e["time_taken"]) if e["time_taken"] else datetime.min
                     )
@@ -1333,12 +1183,9 @@ with st.expander("Meds", expanded=False):
         else:
             st.warning("No med groups found in all_lists.json.")
 
-    # -----------------------------
-    # Remove, Reset, Display & Save
-    # -----------------------------
+    # --- Remove, Reset, Display & Save ---
     if remove_clicked:
         st.session_state.show_remove_med = True
-
     if st.session_state.get("show_remove_med", False):
         st.markdown("### Remove Medication")
         med_times = [
@@ -1355,13 +1202,11 @@ with st.expander("Meds", expanded=False):
         with col2:
             if st.button("Close Remove Section", key="close_remove_med"):
                 st.session_state.show_remove_med = False
-
     if reset_clicked:
         st.session_state.med = st.session_state.original_med.copy()
         st.success("Reset to original file entries")
 
     st.markdown("### Medication Timeline")
-
     def render_med_list(title, entries):
         st.markdown(f"#### {title}")
         if entries:
@@ -1371,18 +1216,11 @@ with st.expander("Meds", expanded=False):
                 st.markdown(f"{entry_time} - {entry['emoji']}{entry['name']}{amt} [{entry['status']}]")
         else:
             st.markdown("_No entries_")
-
     render_med_list("Current Entries", display_meds)
 
-    # -----------------------------
-    # Save & Validate Medications
-    # -----------------------------
     if st.button("✅ Save & Validate Medications"):
         data = st.session_state.data
-
-        # When saving: combine real + virtual-skipped for file write (no special flags)
         save_meds = st.session_state.med.copy()
-        # Add missing skipped entries again (if still absent)
         existing = set((m['name'], m['emoji']) for m in save_meds)
         for group_key in ["morning_med", "night_med"]:
             for med_str in all_lists.get(group_key, []) if all_lists else []:
@@ -1396,10 +1234,7 @@ with st.expander("Meds", expanded=False):
                         "dose": med.get("dose", ""),
                         "time_taken": "",
                     })
-
         data["med_entries"] = save_meds
-
-        # Ensure validated_entries works even if [{}] or {}
         if "validated_entries" not in data or not data["validated_entries"] or data["validated_entries"] == [{}]:
             data["validated_entries"] = [{
                 "symptoms_valid": "false",
@@ -1410,11 +1245,9 @@ with st.expander("Meds", expanded=False):
                 "med_valid": "true"
             }]
         else:
-            # Only update med_valid, preserve other keys
             if isinstance(data["validated_entries"], list) and len(data["validated_entries"]) > 0:
                 data["validated_entries"][0]["med_valid"] = "true"
             else:
-                # fallback for empty dict
                 data["validated_entries"] = [{
                     "symptoms_valid": "false",
                     "conditions_valid": "false",
@@ -1423,13 +1256,8 @@ with st.expander("Meds", expanded=False):
                     "reproductive_valid": "false",
                     "med_valid": "true"
                 }]
-
         save_log(selected_date, data)
         st.success("✅ Medication entries saved and validated!")
-
-        # inside your app
-        update_combined_excel(dbx, DROPBOX_FOLDER)
-        # inside your app
         update_combined_excel(dbx, DROPBOX_FOLDER)
 
 # -----------------------------
