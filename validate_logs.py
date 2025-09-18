@@ -12,10 +12,15 @@ from symptoms_page import symptoms_page
 import importlib
 import excel_updater
 import pandas as pd
+import io  # <-- ADD THIS
 
 importlib.reload(excel_updater)
 
 EXCEL_PATH = "/Users/melinaahmad/Library/Mobile Documents/com~apple~CloudDocs/Shortcuts/New/combined_data.xlsx"
+
+# --- DROPBOX CONFIG ---
+DROPBOX_FOLDER = "/HealthLogs"
+DROPBOX_EXCEL_NAME = "combined_data.xlsx"
 
 @st.cache_data
 def load_all_data(path):
@@ -30,6 +35,28 @@ def load_all_data(path):
         sheets[name] = df
     return sheets
 
+# --- NEW: LOAD EXCEL DIRECTLY FROM DROPBOX ---
+@st.cache_data(ttl=300)
+def load_excel_from_dropbox(dbx, folder=DROPBOX_FOLDER, file_name=DROPBOX_EXCEL_NAME):
+    path = f"{folder}/{file_name}"
+    try:
+        md, res = dbx.files_download(path)
+        excel_bytes = res.content
+        sheets = pd.read_excel(io.BytesIO(excel_bytes), sheet_name=None)
+        for name, df in sheets.items():
+            for col in df.columns:
+                if "time" in col.lower() or "date" in col.lower():
+                    try:
+                        df[col] = pd.to_datetime(df[col], errors="ignore")
+                    except Exception:
+                        pass
+            sheets[name] = df
+        return sheets
+    except Exception as e:
+        st.error(f"Failed to load Excel from Dropbox: {e}")
+        return {}
+
+# --- Only used for the Validate Logs page (local path) ---
 data = load_all_data(EXCEL_PATH)
 symptoms_df = data.get("Symptoms", pd.DataFrame())
 
@@ -37,10 +64,7 @@ if not symptoms_df.empty and "time" in symptoms_df.columns:
     symptoms_df["time"] = pd.to_datetime(symptoms_df["time"], errors="coerce")
 
 def validate_logs_page():
-    
-    # -----------------------------
-    # Config
-    # -----------------------------
+    # ... [UNCHANGED CODE BEFORE dbx init] ...
     st.set_page_config(
         page_title="Nightly Validator",
         page_icon="favicon.png",
@@ -1296,13 +1320,24 @@ def validate_logs_page():
 
 def view_data_page():
     st.header("View Data")
+    # --- Load Dropbox Excel, not local one! ---
+    dbx = dropbox.Dropbox(
+        oauth2_refresh_token=st.secrets["dropbox_refresh_token"],
+        app_key=st.secrets["dropbox_app_key"],
+        app_secret=st.secrets["dropbox_app_secret"]
+    )
+    sheets = load_excel_from_dropbox(dbx)
+    symptoms_df = sheets.get("Symptoms", pd.DataFrame())
+    if not symptoms_df.empty and "time" in symptoms_df.columns:
+        symptoms_df["time"] = pd.to_datetime(symptoms_df["time"], errors="coerce")
+
     subpage = st.selectbox(
         "Select sub-page:",
         ["Symptoms", "Heart Rate", "Sleep", "Nutrition", "Activity", "Other"]
     )
 
     if subpage == "Symptoms":
-        symptoms_page(symptoms_df)  # <- pass the dataframe
+        symptoms_page(symptoms_df)  # <- now using Dropbox data
     elif subpage == "Heart Rate":
         st.info("Heart rate data view coming soon.")
     elif subpage == "Sleep":
