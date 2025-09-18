@@ -8,6 +8,7 @@ from collections import defaultdict
 import dropbox
 from dropbox.files import WriteMode
 from excel_updater import update_combined_excel
+from symptoms_page import symptoms_page
 import importlib
 import excel_updater
 
@@ -1278,7 +1279,7 @@ def view_data_page():
         ["Symptoms", "Heart Rate", "Sleep", "Nutrition", "Activity", "Other"]
     )
     if subpage == "Symptoms":
-        st.info("Symptoms data view coming soon.")
+        symptoms_page(symptoms_df)
     elif subpage == "Heart Rate":
         st.info("Heart rate data view coming soon.")
     elif subpage == "Sleep":
