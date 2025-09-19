@@ -364,16 +364,15 @@ def hr_page(dbx=None, sheets=None):
             start = sel_start
             end = sel_end
             all_days = pd.date_range(start, end, freq="D").date
-            grouped = plot_df.set_index("date")
             chunks = []
             for i in range(0, len(all_days), 3):
                 block = all_days[i:i + 3]
                 vals = {"date": block[0]}
                 subset = plot_df[plot_df["date"].isin(block)]
                 if not subset.empty:
-                    vals["HR_max"] = pd.to_numeric(subset["HR_max"].dropna().astype(float)).mean() if "HR_max" in subset else np.nan
-                    vals["HR_avg"] = pd.to_numeric(subset["HR_avg"].dropna().astype(float)).mean() if "HR_avg" in subset else np.nan
-                    vals["HR_min"] = pd.to_numeric(subset["HR_min"].dropna().astype(float)).mean() if "HR_min" in subset else np.nan
+                    vals["HR_max"] = pd.to_numeric(subset["HR_max"].dropna().astype(float)).mean()
+                    vals["HR_avg"] = pd.to_numeric(subset["HR_avg"].dropna().astype(float)).mean()
+                    vals["HR_min"] = pd.to_numeric(subset["HR_min"].dropna().astype(float)).mean()
                 else:
                     vals["HR_max"] = np.nan
                     vals["HR_avg"] = np.nan
@@ -381,19 +380,28 @@ def hr_page(dbx=None, sheets=None):
                 chunks.append(vals)
             hr_plot = pd.DataFrame(chunks)
 
-            # ticks: month names present in the window
-            months = sorted({d.strftime("%b") for d in pd.date_range(start, end, freq="MS")})
             fig, ax = plt.subplots(figsize=(12, 4))
             x_pos = np.arange(len(hr_plot))
             for col in ["HR_max", "HR_avg", "HR_min"]:
                 ax.scatter(x_pos, hr_plot[col], label=col.replace("_", " "), color=COLORS[col], marker=MARKERS[col])
-            # label ticks as month names roughly spread across
-            n = len(hr_plot)
-            if n > 0:
-                tick_positions = np.linspace(0, n - 1, min(len(months), max(1, len(months)))).astype(int)
-                tick_labels = months[: len(tick_positions)]
-                ax.set_xticks(tick_positions)
-                ax.set_xticklabels(tick_labels)
+
+            # place month labels at closest chunk to 1st of each month in window
+            month_positions = []
+            month_labels = []
+            cur = date(start.year, start.month, 1)
+            while cur <= end:
+                if not hr_plot.empty:
+                    diffs = [abs((row - cur).days) for row in hr_plot["date"]]
+                    if diffs:
+                        pos = int(np.argmin(diffs))
+                        month_positions.append(pos)
+                        month_labels.append(cur.strftime("%b"))
+                cur = (cur + relativedelta(months=1))
+
+            if month_positions:
+                ax.set_xticks(month_positions)
+                ax.set_xticklabels(month_labels)
+
             ax.set_xlabel("3-day chunks")
             ax.set_ylabel("BPM")
             ax.set_title(f"6-Month Window: {start.strftime('%b %Y')} → {end.strftime('%b %Y')}")
