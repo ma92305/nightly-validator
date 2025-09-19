@@ -1339,7 +1339,7 @@ def view_data_page():
     if subpage == "Symptoms":
         symptoms_page(symptoms_df)  # <- now using Dropbox data
     elif subpage == "Heart Rate":
-        st.info("Heart rate data view coming soon.")
+        hr_page(dbx)
     elif subpage == "Sleep":
         st.info("Sleep data view coming soon.")
     elif subpage == "Nutrition":
