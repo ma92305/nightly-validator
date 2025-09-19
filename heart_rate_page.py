@@ -402,14 +402,13 @@ def hr_page(dbx=None, sheets=None):
             st.pyplot(fig)
 
         elif view == "Y":
-            # aggregate into calendar-week averages (Mon-Sun or Sun-Sat?). We'll use Sunday-week to match x-axis labels user requested.
+            # aggregate into calendar-week averages (Sunday–Saturday weeks)
             start = sel_start
             end = sel_end
-            # build weeks starting at Jan 1 etc. We'll create one dot per week (Sunday start)
+
+            # build weeks starting at nearest Sunday before start
             week_starts = []
-            cur = start
-            # align to Sunday
-            cur = cur - timedelta(days=(cur.weekday() + 1) % 7)
+            cur = start - timedelta(days=(start.weekday() + 1) % 7)
             while cur <= end:
                 week_starts.append(cur)
                 cur += timedelta(weeks=1)
@@ -420,43 +419,49 @@ def hr_page(dbx=None, sheets=None):
                 subset = plot_df[(plot_df["date"] >= ws) & (plot_df["date"] <= we)]
                 vals = {"date": ws}
                 if not subset.empty:
-                    vals["HR_max"] = pd.to_numeric(subset["HR_max"].dropna().astype(float)).mean() if "HR_max" in subset else np.nan
-                    vals["HR_avg"] = pd.to_numeric(subset["HR_avg"].dropna().astype(float)).mean() if "HR_avg" in subset else np.nan
-                    vals["HR_min"] = pd.to_numeric(subset["HR_min"].dropna().astype(float)).mean() if "HR_min" in subset else np.nan
+                    vals["HR_max"] = pd.to_numeric(subset["HR_max"].dropna().astype(float)).mean()
+                    vals["HR_avg"] = pd.to_numeric(subset["HR_avg"].dropna().astype(float)).mean()
+                    vals["HR_min"] = pd.to_numeric(subset["HR_min"].dropna().astype(float)).mean()
                 else:
                     vals["HR_max"] = np.nan
                     vals["HR_avg"] = np.nan
                     vals["HR_min"] = np.nan
                 chunks.append(vals)
+
             hr_plot = pd.DataFrame(chunks)
 
-            # x ticks are months initial letters J F M A M J J A S O N D across the year span
+            # x ticks: months (J F M A M J J A S O N D)
             months_initials = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"]
             fig, ax = plt.subplots(figsize=(12, 4))
             x_pos = np.arange(len(hr_plot))
             for col in ["HR_max", "HR_avg", "HR_min"]:
-                ax.scatter(x_pos, hr_plot[col], label=col.replace("_", " "), color=COLORS[col], marker=MARKERS[col])
-            # place month-letter ticks at approximate positions
-            # compute first day of each month within the year span and find closest index
+                ax.scatter(
+                    x_pos,
+                    hr_plot[col],
+                    label=col.replace("_", " "),
+                    color=COLORS[col],
+                    marker=MARKERS[col],
+                )
+
+            # place month-letter ticks at closest weekly points
             month_positions = []
             month_labels = []
             for m in range(1, 13):
                 mday = date(sel_start.year, m, 1)
-                # find closest chunk index
                 if not hr_plot.empty:
-                    diffs = [abs((row.date() - mday).days) for row in hr_plot["date"]]
+                    diffs = [abs((row - mday).days) for row in hr_plot["date"]]  # FIXED: row is already a date
                     if diffs:
                         pos = int(np.argmin(diffs))
                         month_positions.append(pos)
                         month_labels.append(months_initials[m - 1])
+
             if month_positions:
                 ax.set_xticks(month_positions)
                 ax.set_xticklabels(month_labels)
+
             ax.set_xlabel("Weeks (approx)")
             ax.set_ylabel("BPM")
             ax.set_title(f"Year: {sel_start.year}")
             ax.legend()
             plt.tight_layout()
             st.pyplot(fig)
-
-    st.info("Tip: use the D/W/M/6M/Y buttons and the arrows to move backward/forward through time windows.")
