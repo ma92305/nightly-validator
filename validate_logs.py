@@ -37,10 +37,10 @@ def load_all_data(path):
 
 # --- NEW: LOAD EXCEL DIRECTLY FROM DROPBOX ---
 @st.cache_data(ttl=300)
-def load_excel_from_dropbox(dbx, folder=DROPBOX_FOLDER, file_name=DROPBOX_EXCEL_NAME):
+def load_excel_from_dropbox(_dbx, folder=DROPBOX_FOLDER, file_name=DROPBOX_EXCEL_NAME):
     path = f"{folder}/{file_name}"
     try:
-        md, res = dbx.files_download(path)
+        md, res = _dbx.files_download(path)  # <-- use _dbx, not dbx
         excel_bytes = res.content
         sheets = pd.read_excel(io.BytesIO(excel_bytes), sheet_name=None)
         for name, df in sheets.items():
