@@ -10,7 +10,7 @@ from dropbox.files import WriteMode
 from excel_updater import update_combined_excel
 from symptoms_page import symptoms_page
 from heart_rate_page import hr_page
-from correlation_page import correlation_page
+from correlation_page import find_correlations, lag_series
 import importlib
 import excel_updater
 import pandas as pd
