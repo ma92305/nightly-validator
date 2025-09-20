@@ -530,11 +530,13 @@ def hr_page(dbx=None, sheets=None):
             plt.tight_layout()
             st.pyplot(fig)
 
-    st.info("Tip: use the D/W/M/6M/Y buttons and the arrows to move backward/forward through time windows.")
-
     # --- Tachy % and HRV chart (for W / M / 6M / Y) ---
     if view in ["W", "M", "6M", "Y"]:
-        st.subheader("Tachycardia % and HRV")
+        st.subheader("Tachycardia % / HRV")
+
+        metric_choice = st.selectbox("Select metric:", ["Tachy %", "HRV"])
+        metric_map = {"Tachy %": "tachy_percent", "HRV": "HRV"}
+        chosen_col = metric_map[metric_choice]
 
         if hr_range.empty:
             st.info("No tachy/HRV stats for this period.")
@@ -542,19 +544,7 @@ def hr_page(dbx=None, sheets=None):
             plot_df2 = hr_range.copy().sort_values("date")
 
             # --- Aggregation depending on view ---
-            if view == "W":
-                days = pd.date_range(sel_start, sel_end, freq="D").date
-                df_points = []
-                for d in days:
-                    row = plot_df2[plot_df2["date"] == d]
-                    df_points.append({
-                        "date": d,
-                        "tachy_percent": pd.to_numeric(row["tachy_percent"].dropna(), errors="coerce").mean(),
-                        "HRV": pd.to_numeric(row["HRV"].dropna(), errors="coerce").mean(),
-                    })
-                data_plot = pd.DataFrame(df_points)
-
-            elif view == "M":
+            if view in ["W", "M"]:
                 days = pd.date_range(sel_start, sel_end, freq="D").date
                 df_points = []
                 for d in days:
@@ -596,36 +586,35 @@ def hr_page(dbx=None, sheets=None):
                     })
                 data_plot = pd.DataFrame(chunks)
 
-            # --- Plot ---
+            # --- Plot chosen metric ---
             fig, ax = plt.subplots(figsize=(12, 4))
             x_pos = np.arange(len(data_plot))
 
             colors2 = {"tachy_percent": "#9467bd", "HRV": "#ff7f0e"}
             markers2 = {"tachy_percent": "o", "HRV": "s"}
 
-            for col in ["tachy_percent", "HRV"]:
-                y = data_plot[col].to_numpy(dtype=float)
-                ax.scatter(x_pos, y, label=col.replace("_", " ").title(),
-                           color=colors2[col], marker=markers2[col])
+            y = data_plot[chosen_col].to_numpy(dtype=float)
+            ax.scatter(x_pos, y, label=metric_choice,
+                       color=colors2[chosen_col], marker=markers2[chosen_col])
 
-                # smoothing: spline if >=3, linear if 2
-                mask = ~np.isnan(y)
-                if mask.sum() >= 3:
-                    try:
-                        xs = x_pos[mask]
-                        ys = y[mask]
-                        spline = make_interp_spline(xs, ys, k=3)
-                        xs_smooth = np.linspace(xs.min(), xs.max(), 300)
-                        ys_smooth = spline(xs_smooth)
-                        ax.plot(xs_smooth, ys_smooth, color=colors2[col], linewidth=1.6, alpha=0.8)
-                    except Exception:
-                        pass
-                elif mask.sum() == 2:
+            # smoothing
+            mask = ~np.isnan(y)
+            if mask.sum() >= 3:
+                try:
                     xs = x_pos[mask]
                     ys = y[mask]
-                    ax.plot(xs, ys, color=colors2[col], linewidth=1.2, alpha=0.8)
+                    spline = make_interp_spline(xs, ys, k=3)
+                    xs_smooth = np.linspace(xs.min(), xs.max(), 300)
+                    ys_smooth = spline(xs_smooth)
+                    ax.plot(xs_smooth, ys_smooth, color=colors2[chosen_col], linewidth=1.6, alpha=0.8)
+                except Exception:
+                    pass
+            elif mask.sum() == 2:
+                xs = x_pos[mask]
+                ys = y[mask]
+                ax.plot(xs, ys, color=colors2[chosen_col], linewidth=1.2, alpha=0.8)
 
-            ax.set_ylabel("Value")
+            ax.set_ylabel(metric_choice)
             ax.set_xlabel("Time")
 
             if view == "W":
