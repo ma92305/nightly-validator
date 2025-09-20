@@ -24,6 +24,12 @@ EXCEL_PATH = "/Users/melinaahmad/Library/Mobile Documents/com~apple~CloudDocs/Sh
 DROPBOX_FOLDER = "/HealthLogs"
 DROPBOX_EXCEL_NAME = "combined_data.xlsx"
 
+dbx = dropbox.Dropbox(
+    oauth2_refresh_token=st.secrets["dropbox_refresh_token"],
+    app_key=st.secrets["dropbox_app_key"],
+    app_secret=st.secrets["dropbox_app_secret"]
+)
+
 @st.cache_data
 def load_all_data(path):
     sheets = pd.read_excel(path, sheet_name=None)
@@ -31,8 +37,9 @@ def load_all_data(path):
         for col in df.columns:
             if "time" in col.lower() or "date" in col.lower():
                 try:
-                    df[col] = pd.to_datetime(df[col], errors="ignore")
+                    df[col] = pd.to_datetime(df[col])
                 except Exception:
+                    # leave column as-is if it can't be parsed
                     pass
         sheets[name] = df
     return sheets
