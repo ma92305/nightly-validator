@@ -1,5 +1,3 @@
-
-# heart_rate_page.py
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -533,3 +531,143 @@ def hr_page(dbx=None, sheets=None):
             st.pyplot(fig)
 
     st.info("Tip: use the D/W/M/6M/Y buttons and the arrows to move backward/forward through time windows.")
+
+    # --- Tachy % and HRV chart (for W / M / 6M / Y) ---
+    if view in ["W", "M", "6M", "Y"]:
+        st.subheader("Tachycardia % and HRV")
+
+        if hr_range.empty:
+            st.info("No tachy/HRV stats for this period.")
+        else:
+            plot_df2 = hr_range.copy().sort_values("date")
+
+            # --- Aggregation depending on view ---
+            if view == "W":
+                days = pd.date_range(sel_start, sel_end, freq="D").date
+                df_points = []
+                for d in days:
+                    row = plot_df2[plot_df2["date"] == d]
+                    df_points.append({
+                        "date": d,
+                        "tachy_percent": pd.to_numeric(row["tachy_percent"].dropna(), errors="coerce").mean(),
+                        "HRV": pd.to_numeric(row["HRV"].dropna(), errors="coerce").mean(),
+                    })
+                data_plot = pd.DataFrame(df_points)
+
+            elif view == "M":
+                days = pd.date_range(sel_start, sel_end, freq="D").date
+                df_points = []
+                for d in days:
+                    row = plot_df2[plot_df2["date"] == d]
+                    df_points.append({
+                        "date": d,
+                        "tachy_percent": pd.to_numeric(row["tachy_percent"].dropna(), errors="coerce").mean(),
+                        "HRV": pd.to_numeric(row["HRV"].dropna(), errors="coerce").mean(),
+                    })
+                data_plot = pd.DataFrame(df_points)
+
+            elif view == "6M":
+                all_days = pd.date_range(sel_start, sel_end, freq="D").date
+                chunks = []
+                for i in range(0, len(all_days), 3):
+                    block = all_days[i:i+3]
+                    subset = plot_df2[plot_df2["date"].isin(block)]
+                    chunks.append({
+                        "date": block[0],
+                        "tachy_percent": pd.to_numeric(subset["tachy_percent"].dropna(), errors="coerce").mean(),
+                        "HRV": pd.to_numeric(subset["HRV"].dropna(), errors="coerce").mean(),
+                    })
+                data_plot = pd.DataFrame(chunks)
+
+            elif view == "Y":
+                week_starts = []
+                cur = sel_start - timedelta(days=(sel_start.weekday() + 1) % 7)
+                while cur <= sel_end:
+                    week_starts.append(cur)
+                    cur += timedelta(weeks=1)
+                chunks = []
+                for ws in week_starts:
+                    we = ws + timedelta(days=6)
+                    subset = plot_df2[(plot_df2["date"] >= ws) & (plot_df2["date"] <= we)]
+                    chunks.append({
+                        "date": ws,
+                        "tachy_percent": pd.to_numeric(subset["tachy_percent"].dropna(), errors="coerce").mean(),
+                        "HRV": pd.to_numeric(subset["HRV"].dropna(), errors="coerce").mean(),
+                    })
+                data_plot = pd.DataFrame(chunks)
+
+            # --- Plot ---
+            fig, ax = plt.subplots(figsize=(12, 4))
+            x_pos = np.arange(len(data_plot))
+
+            colors2 = {"tachy_percent": "#9467bd", "HRV": "#ff7f0e"}
+            markers2 = {"tachy_percent": "o", "HRV": "s"}
+
+            for col in ["tachy_percent", "HRV"]:
+                y = data_plot[col].to_numpy(dtype=float)
+                ax.scatter(x_pos, y, label=col.replace("_", " ").title(),
+                           color=colors2[col], marker=markers2[col])
+
+                # smoothing: spline if >=3, linear if 2
+                mask = ~np.isnan(y)
+                if mask.sum() >= 3:
+                    try:
+                        xs = x_pos[mask]
+                        ys = y[mask]
+                        spline = make_interp_spline(xs, ys, k=3)
+                        xs_smooth = np.linspace(xs.min(), xs.max(), 300)
+                        ys_smooth = spline(xs_smooth)
+                        ax.plot(xs_smooth, ys_smooth, color=colors2[col], linewidth=1.6, alpha=0.8)
+                    except Exception:
+                        pass
+                elif mask.sum() == 2:
+                    xs = x_pos[mask]
+                    ys = y[mask]
+                    ax.plot(xs, ys, color=colors2[col], linewidth=1.2, alpha=0.8)
+
+            ax.set_ylabel("Value")
+            ax.set_xlabel("Time")
+
+            if view == "W":
+                ax.set_xticks(x_pos)
+                ax.set_xticklabels([d.strftime("%a") for d in data_plot["date"]])
+                ax.set_title(f"Week {sel_start.strftime('%b %-d')} → {sel_end.strftime('%b %-d, %Y')}")
+            elif view == "M":
+                ax.set_xticks([0, 6, 13, 20, 27])
+                ax.set_xticklabels(["1", "7", "14", "21", "28+"])
+                ax.set_title(sel_start.strftime("%B %Y"))
+            elif view == "6M":
+                month_positions, month_labels = [], []
+                if not data_plot.empty:
+                    chunk_dates = pd.to_datetime(data_plot["date"]).dt.date.tolist()
+                    cur = date(sel_start.year, sel_start.month, 1)
+                    while cur <= sel_end:
+                        deltas = [abs((cd - cur).days) for cd in chunk_dates]
+                        if deltas:
+                            pos = int(np.argmin(deltas))
+                            if not month_positions or month_positions[-1] != pos:
+                                month_positions.append(pos)
+                                month_labels.append(cur.strftime("%b"))
+                        cur = (cur + relativedelta(months=1))
+                ax.set_xticks(month_positions)
+                ax.set_xticklabels(month_labels)
+                ax.set_title(f"6-Month Window: {sel_start.strftime('%b %Y')} → {sel_end.strftime('%b %Y')}")
+            elif view == "Y":
+                month_positions, month_labels = [], []
+                if not data_plot.empty:
+                    chunk_dates = pd.to_datetime(data_plot["date"]).dt.date.tolist()
+                    for m in range(1, 13):
+                        mday = date(sel_start.year, m, 1)
+                        deltas = [abs((cd - mday).days) for cd in chunk_dates]
+                        if deltas:
+                            pos = int(np.argmin(deltas))
+                            if not month_positions or month_positions[-1] != pos:
+                                month_positions.append(pos)
+                                month_labels.append(mday.strftime("%b")[0])
+                ax.set_xticks(month_positions)
+                ax.set_xticklabels(month_labels)
+                ax.set_title(f"Year {sel_start.year}")
+
+            ax.legend()
+            plt.tight_layout()
+            st.pyplot(fig)
