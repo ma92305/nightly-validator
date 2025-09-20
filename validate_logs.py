@@ -10,6 +10,7 @@ from dropbox.files import WriteMode
 from excel_updater import update_combined_excel
 from symptoms_page import symptoms_page
 from heart_rate_page import hr_page
+from correlation_page import correlation_page
 import importlib
 import excel_updater
 import pandas as pd
@@ -1350,16 +1351,11 @@ def view_data_page():
     elif subpage == "Other":
         st.info("Other data views coming soon.")
 
-# --- Correlations Page ---
-def correlations_page():
-    st.header("Correlations")
-    st.info("Correlation analysis coming soon.")
-
 # --- Sidebar Navigation ---
 PAGES = {
     "Validate Logs": validate_logs_page,
     "View Data": view_data_page,
-    "Correlations": correlations_page
+    "Correlations": lambda: correlation_page(dbx)
 }
 
 st.sidebar.title("Navigation")
