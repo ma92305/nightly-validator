@@ -15,14 +15,14 @@ def correlation_page(dbx):
         st.error("No data provided. Please load Excel data first.")
         return
 
-    # --- Define variable structure ---
+    # --- Define variable structure with actual sheet names ---
     variable_map = {
         "Conditions": {"Condition": ("Conditions", "item")},
         "Activity": {
-            "Stairs": ("Activity", "Stairs_Quantity"),
-            "Walking Long": ("Activity", "Walking_Long"),
-            "Walking Brisk": ("Activity", "Walking_Brisk"),
-            "Standing": ("Activity", "Standing_Duration"),
+            "Stairs": ("Stairs", "Quantity"),
+            "Standing": ("Standing", "Duration"),
+            "Walking Long": ("Walking", "Steps"),
+            "Walking Brisk": ("Walking", "Steps"),
         },
         "Tachycardia": {"Tachy %": ("HR Stats", "tachy_percent")},
         "Daily HR Stats": {
@@ -76,27 +76,28 @@ def correlation_page(dbx):
         st.warning(f"Selected sheets {sheet_A} or {sheet_B} are empty.")
         return
 
+    # --- Filter Walking subcategories ---
+    walking_map = {
+        "Walking Long": "Long Walk",
+        "Walking Brisk": "Brisk Walk"
+    }
+    if var_A_col in walking_map:
+        df_A = df_A[df_A["Item"].str.contains(walking_map[var_A_col], na=False)]
+    if var_B_col in walking_map:
+        df_B = df_B[df_B["Item"].str.contains(walking_map[var_B_col], na=False)]
+
     # --- Convert time/date columns ---
     for df in [df_A, df_B]:
         for c in df.columns:
             if "time" in c.lower() or "date" in c.lower():
                 df[c] = pd.to_datetime(df[c], errors="coerce")
 
-    # --- Coerce numeric HR/Tachy columns ---
-    numeric_cols = ["HR_max", "HR_avg", "HR_min", "HRV", "tachy_percent", "Stairs_Quantity", "Duration", "Steps", "Steps/min"]
+    # --- Coerce numeric columns ---
+    numeric_cols = ["HR_max", "HR_avg", "HR_min", "HRV", "tachy_percent", "Quantity", "Duration", "Steps", "Steps/min"]
     for col in numeric_cols:
-        if col in df_A.columns:
-            before_na = df_A[col].isna().sum()
-            df_A[col] = pd.to_numeric(df_A[col], errors="coerce")
-            after_na = df_A[col].isna().sum()
-            if after_na > before_na:
-                st.warning(f"Column '{col}' in Variable A had {after_na-before_na} non-numeric values coerced to NaN")
-        if col in df_B.columns:
-            before_na = df_B[col].isna().sum()
-            df_B[col] = pd.to_numeric(df_B[col], errors="coerce")
-            after_na = df_B[col].isna().sum()
-            if after_na > before_na:
-                st.warning(f"Column '{col}' in Variable B had {after_na-before_na} non-numeric values coerced to NaN")
+        for df, name in zip([df_A, df_B], ["A", "B"]):
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # --- Determine time columns ---
     time_A = next((c for c in df_A.columns if "time" in c.lower() or "date" in c.lower()), None)
@@ -106,12 +107,13 @@ def correlation_page(dbx):
         return
 
     # --- Handle Walking duration ---
-    if "Walking" in var_A_col and "Start_time" in df_A.columns and "End_time" in df_A.columns:
-        df_A["Duration"] = (df_A["End_time"] - df_A["Start_time"]).dt.total_seconds() / 60.0
-        col_A = "Duration"
-    if "Walking" in var_B_col and "Start_time" in df_B.columns and "End_time" in df_B.columns:
-        df_B["Duration"] = (df_B["End_time"] - df_B["Start_time"]).dt.total_seconds() / 60.0
-        col_B = "Duration"
+    for df, var_col, col in zip([df_A, df_B], [var_A_col, var_B_col], [col_A, col_B]):
+        if "Walking" in var_col and "Start_time" in df.columns and "End_time" in df.columns:
+            df["Duration"] = (df["End_time"] - df["Start_time"]).dt.total_seconds() / 60.0
+            if df is df_A:
+                col_A = "Duration"
+            else:
+                col_B = "Duration"
 
     # --- Run correlation ---
     if st.button("Run Correlation Scan"):
