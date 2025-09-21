@@ -188,25 +188,66 @@ def correlation_page(dbx):
     min_abs_r = st.slider("Minimum absolute correlation to show:", 0.0, 1.0, 0.25, 0.01)
     p_threshold = st.number_input("Max p-value to show (NaN = ignore):", value=0.05, format="%.3f")
 
-    # Cache folder
-    os.makedirs(CORR_CACHE_DIR, exist_ok=True)
+    # ---- Correlation computation (cache per scenario, lag and variable set) ----
     cache_key = f"{scenario}_{user_start}_{user_end}_{','.join(map(str,lags_choice))}.parquet"
-    cache_path = os.path.join(CORR_CACHE_DIR, cache_key)
-
+    cache_path = os.path.join("corr_cache", cache_key)
+    os.makedirs("corr_cache", exist_ok=True)
+    
+    # Load from cache if exists
     if os.path.exists(cache_path):
-        all_corr = pd.read_parquet(cache_path)
+        try:
+            all_corr = pd.read_parquet(cache_path)
+            st.info(f"Loaded correlations from cache ({len(all_corr)} rows)")
+        except Exception:
+            st.warning("Failed to read cached correlations. Recomputing...")
+            all_corr = compute_all_pairwise_correlations(filtered_vars_dict, lags_hours=lags_choice)
+            all_corr.to_parquet(cache_path)
     else:
         all_corr = compute_all_pairwise_correlations(filtered_vars_dict, lags_hours=lags_choice)
         all_corr.to_parquet(cache_path)
-
-    # Filtering
-    all_corr = all_corr[~((all_corr['var_a']==all_corr['var_b']) & (all_corr['lag_hours']==0))]
+        st.info(f"Computed correlations ({len(all_corr)} rows)")
+    
+    # Check expected columns exist
+    expected_cols = ['var_a','var_b','lag_hours','method','r','p','n']
+    missing = [c for c in expected_cols if c not in all_corr.columns]
+    if missing:
+        st.error(f"Missing expected columns in correlation DataFrame: {missing}")
+        st.write(all_corr.head())
+        return
+    
+    # Handle completely empty correlation set
+    if all_corr.empty:
+        st.warning("No correlations found for this variable set and lag range.")
+        return
+    
+    # --- Remove self correlations at zero lag ---
+    all_corr = all_corr[~((all_corr['var_a'] == all_corr['var_b']) & (all_corr['lag_hours'] == 0))]
+    
+    # --- Remove sleep-sleep correlations ---
+    sleep_vars = {"bedtime (sec)", "waketime (sec)", "time_in_bed (sec)",
+                  "sleep_duration (sec)", "sleep_quality", "sleep_efficiency"}
+    sleep_vars = {v.lower().strip() for v in sleep_vars}
+    all_corr = all_corr[~(
+        all_corr['var_a'].str.strip().str.lower().isin(sleep_vars) &
+        all_corr['var_b'].str.strip().str.lower().isin(sleep_vars)
+    )]
+    
+    # --- Filter within-group if scenario forbids it ---
     if not sc.get('allow_within_group', True):
-        all_corr = all_corr[~all_corr.apply(lambda row: var_categories.get(row['var_a'])==var_categories.get(row['var_b']), axis=1)]
-    all_corr = all_corr[all_corr['n']>=6]
+        def same_group(row):
+            return var_categories.get(row['var_a']) == var_categories.get(row['var_b'])
+        all_corr = all_corr[~all_corr.apply(same_group, axis=1)]
+    
+    # --- Filter correlations by sample size, p-value, magnitude ---
+    all_corr = all_corr[all_corr['n'] >= 6]
     if p_threshold is not None:
-        all_corr = all_corr[(all_corr['p'].isna()) | (all_corr['p']<=p_threshold)]
-    all_corr = all_corr[all_corr['r'].abs()>=min_abs_r]
+        all_corr = all_corr[(all_corr['p'].isna()) | (all_corr['p'] <= p_threshold)]
+    all_corr = all_corr[all_corr['r'].abs() >= min_abs_r]
+    
+    if all_corr.empty:
+        st.warning("No correlations match your filters (sample size, p-value, minimum r).")
+        return
+    
     st.write(f"{len(all_corr)} correlations matching filters.")
 
     # Summary
