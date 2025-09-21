@@ -7,9 +7,6 @@ from load_excel import load_excel_from_dropbox
 
 # --- Helper to normalize time columns ---
 def normalize_times(df, time_col):
-    """
-    Convert a column to pandas datetime, drop NaNs, sort, and set as index.
-    """
     df = df.copy()
     df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
     df = df.dropna(subset=[time_col])
@@ -17,8 +14,46 @@ def normalize_times(df, time_col):
     df = df.set_index(time_col)
     return df
 
+# --- Aggregate stairs by day ---
+def aggregate_daily_stairs(df, time_col, quantity_col):
+    df = normalize_times(df, time_col)
+    daily_total = df[quantity_col].resample("D").sum()
+    return daily_total
+
+# --- Aggregate tachy % by day ---
+def aggregate_daily_tachy_percent(df):
+    df = normalize_times(df, "date")
+    daily_percent = df["tachy_percent"].resample("D").mean()
+    return daily_percent
+
+# --- Event-level tachy metrics per stairs session ---
+def compute_event_level_tachy_metrics(stairs_df, tachy_df, window_hours=4):
+    stairs_df = stairs_df.copy()
+    tachy_df = normalize_times(tachy_df, "event_start")
+    event_metrics = pd.DataFrame(index=stairs_df.index)
+    
+    # Rolling 4hr window after each stairs session
+    occurrences = []
+    max_bpms = []
+    durations = []
+    
+    for t in stairs_df.index:
+        window_start = t
+        window_end = t + pd.Timedelta(hours=window_hours)
+        events = tachy_df[(tachy_df.index >= window_start) & (tachy_df.index <= window_end)]
+        
+        occurrences.append(1 if not events.empty else 0)
+        max_bpms.append(events["max_bpm"].max() if not events.empty else None)
+        durations.append(events["duration_seconds"].max() if not events.empty else None)
+    
+    event_metrics["Tachy Occurrence"] = pd.Series(occurrences, index=stairs_df.index)
+    event_metrics["Tachy Max BPM"] = pd.Series(max_bpms, index=stairs_df.index)
+    event_metrics["Tachy Duration"] = pd.Series(durations, index=stairs_df.index)
+    
+    return event_metrics
+
 def correlation_page(dbx):
-    st.header("Activity ↔ Heart Rate Correlations")
+    st.header("Stairs ↔ Tachycardia Correlations (POTS Analysis)")
 
     # --- Load Excel data ---
     sheets = load_excel_from_dropbox(dbx)
@@ -26,69 +61,52 @@ def correlation_page(dbx):
         st.error("No data loaded. Please upload Excel data first.")
         return
 
-    # --- Variable A / Activity options ---
-    var_A_options = ["Stairs", "Standing", "Walking"]
-    var_A_col = st.selectbox("Select Activity", var_A_options)
+    # --- Activity selection ---
+    activity_options = ["Stairs", "Standing", "Walking"]
+    activity_sel = st.selectbox("Select Activity", activity_options)
 
-    # --- Variable B / Heart Rate options ---
-    var_B_options = ["Tachycardia", "Daily HR Stats"]
-    var_B_col = st.selectbox("Select Heart Rate Metric", var_B_options)
+    # --- Heart Rate metric selection ---
+    hr_options = ["Daily Tachy %", "Event-level Tachy Metrics"]
+    hr_sel = st.selectbox("Select Heart Rate Metric", hr_options)
 
-    # --- Extract Activity Data ---
-    if var_A_col == "Stairs":
-        df_A = sheets.get("Stairs", pd.DataFrame())
-        if df_A.empty:
-            st.warning("Stairs sheet is empty.")
-            return
-        df_A = normalize_times(df_A, "Time")
-        series_A = df_A["Quantity"]
+    # --- Load stairs data ---
+    if activity_sel != "Stairs":
+        st.warning("Currently only 'Stairs' activity is supported for correlation.")
+        return
+    
+    df_stairs = sheets.get("Stairs", pd.DataFrame())
+    if df_stairs.empty:
+        st.warning("Stairs sheet is empty.")
+        return
+    df_stairs = normalize_times(df_stairs, "Time")
+    stairs_series = df_stairs["Quantity"]
 
-    elif var_A_col == "Standing":
-        df_A = sheets.get("Standing", pd.DataFrame())
-        if df_A.empty:
-            st.warning("Standing sheet is empty.")
-            return
-        df_A = normalize_times(df_A, "Start_time")
-        series_A = df_A["Duration"]
-
-    elif var_A_col == "Walking":
-        df_A = sheets.get("Walking", pd.DataFrame())
-        if df_A.empty:
-            st.warning("Walking sheet is empty.")
-            return
-        df_A = normalize_times(df_A, "Start_time")
-        series_A = df_A["Steps"]
-
-    # --- Extract Heart Rate Data ---
+    # --- Load tachy data ---
     df_hr = sheets.get("HR Stats", pd.DataFrame())
     df_tachy = sheets.get("Tachy Events", pd.DataFrame())
-
-    if df_hr.empty:
-        st.warning("HR Stats sheet is empty.")
+    if df_hr.empty or df_tachy.empty:
+        st.warning("HR Stats or Tachy Events sheet is empty.")
         return
-    df_hr = normalize_times(df_hr, "date")
 
     results = []
     sig_results = []
 
     if st.button("Run Correlation Scan"):
+        if hr_sel == "Daily Tachy %":
+            # --- Aggregate daily-level metrics ---
+            daily_stairs = aggregate_daily_stairs(df_stairs, "Time", "Quantity")
+            daily_tachy = aggregate_daily_tachy_percent(df_hr)
 
-        # --- 1️⃣ Daily totals for % of day correlations ---
-        if var_B_col == "Daily HR Stats":
-            stairs_daily = series_A.groupby(series_A.index.date).sum()
-            tachy_daily = df_hr["tachy_percent"]
-            tachy_daily.index = tachy_daily.index.date
-
-            daily_df = pd.DataFrame({
-                "Stairs": stairs_daily,
-                "TachyPercent": tachy_daily
-            }).dropna()
+            # Align days
+            combined = pd.concat([daily_stairs, daily_tachy], axis=1).dropna()
+            series_A = combined.iloc[:, 0]
+            series_B = combined.iloc[:, 1]
 
             res_df, sig_df = find_correlations(
-                daily_df["Stairs"],
-                daily_df["TachyPercent"],
+                series_A,
+                series_B,
                 lags_hours=[0, 1, 2, 6, 12, 24, 48],
-                match_window_hours=0,  # daily totals, no window
+                match_window_hours=24.0,
                 min_pairs=3,
                 permutation_n=500,
                 bootstrap_n=500,
@@ -96,48 +114,27 @@ def correlation_page(dbx):
                 alpha=0.05,
                 random_state=42,
             )
-            res_df["Var_A"] = f"Activity - {var_A_col} (daily total)"
-            res_df["Var_B"] = f"Heart Rate - Tachy % of Day"
-            sig_df["Var_A"] = f"Activity - {var_A_col} (daily total)"
-            sig_df["Var_B"] = f"Heart Rate - Tachy % of Day"
-
+            res_df["Var_A"] = "Total Stairs per Day"
+            res_df["Var_B"] = "Daily Tachy %"
+            sig_df["Var_A"] = "Total Stairs per Day"
+            sig_df["Var_B"] = "Daily Tachy %"
             results.append(res_df)
             if not sig_df.empty:
                 sig_results.append(sig_df)
 
-        # --- 2️⃣ Event-level correlations for tachy events (short window) ---
-        if var_B_col == "Tachycardia" and not df_tachy.empty:
-            df_tachy = normalize_times(df_tachy, "event_start")
+        elif hr_sel == "Event-level Tachy Metrics":
+            # --- Compute event-level tachy metrics ---
+            event_metrics = compute_event_level_tachy_metrics(df_stairs, df_tachy, window_hours=4)
 
-            # Binary occurrence of tachy events in 5 min window
-            binary_events = pd.Series(0, index=series_A.index)
-            max_bpm_series = pd.Series(index=series_A.index, dtype=float)
-            duration_series = pd.Series(index=series_A.index, dtype=float)
+            for metric in event_metrics.columns:
+                series_B = event_metrics[metric]
+                series_A = stairs_series.loc[series_B.index]
 
-            for idx, act_time in enumerate(series_A.index):
-                window_start = act_time
-                window_end = act_time + pd.Timedelta(minutes=5)
-                events_in_window = df_tachy[(df_tachy.index >= window_start) & (df_tachy.index <= window_end)]
-                if not events_in_window.empty:
-                    binary_events.iloc[idx] = 1
-                    max_bpm_series.iloc[idx] = events_in_window["max_bpm"].max()
-                    duration_series.iloc[idx] = events_in_window["duration_seconds"].max()
-                else:
-                    max_bpm_series.iloc[idx] = None
-                    duration_series.iloc[idx] = None
-
-            tachy_series_dict = {
-                "Tachy Event Occurrence": binary_events,
-                "Tachy Event Max BPM": max_bpm_series,
-                "Tachy Event Duration (s)": duration_series
-            }
-
-            for metric_name, series_B in tachy_series_dict.items():
                 res_df, sig_df = find_correlations(
                     series_A,
                     series_B,
                     lags_hours=[0, 1, 2, 6, 12, 24, 48],
-                    match_window_hours=0.1,  # short ~5 min window
+                    match_window_hours=4.0,
                     min_pairs=3,
                     permutation_n=500,
                     bootstrap_n=500,
@@ -145,24 +142,25 @@ def correlation_page(dbx):
                     alpha=0.05,
                     random_state=42,
                 )
-                res_df["Var_A"] = f"Activity - {var_A_col} (event-level)"
-                res_df["Var_B"] = f"Heart Rate - {metric_name}"
-                sig_df["Var_A"] = f"Activity - {var_A_col} (event-level)"
-                sig_df["Var_B"] = f"Heart Rate - {metric_name}"
-
+                res_df["Var_A"] = "Stairs (event-level)"
+                res_df["Var_B"] = f"Tachy - {metric}"
+                sig_df["Var_A"] = "Stairs (event-level)"
+                sig_df["Var_B"] = f"Tachy - {metric}"
                 results.append(res_df)
                 if not sig_df.empty:
                     sig_results.append(sig_df)
 
-    # --- Display ---
-    if results:
+        # --- Combine results ---
         full_res = pd.concat(results, ignore_index=True)
+        full_sig = pd.concat(sig_results, ignore_index=True) if sig_results else pd.DataFrame()
+
+        # --- Display results ---
         st.subheader("Correlation Results")
         st.dataframe(full_res)
 
-        full_sig = pd.concat(sig_results, ignore_index=True) if sig_results else pd.DataFrame()
         st.subheader("Significant Correlations")
         if not full_sig.empty:
             st.dataframe(full_sig)
         else:
             st.info("No significant correlations found.")
+
