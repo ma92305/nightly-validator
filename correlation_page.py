@@ -37,8 +37,15 @@ def point_series_to_hourly(series, hourly_index, method='nearest'):
     return out
 
 def build_all_variables(data, hourly_index):
-    from utils import build_all_variables as build_vars
-    return build_vars(data, hourly_index)
+    # example: convert your data dict into hourly variables
+    vars_dict = {}
+    for sheet_name, df in data.items():
+        for col in df.columns:
+            if col.lower() in ("time","date"):
+                continue
+            series = df[col]
+            vars_dict[f"{sheet_name}: {col}"] = point_series_to_hourly(series, hourly_index)
+    return vars_dict
 
 def compute_all_pairwise_correlations(vars_dict, lags_hours=HOUR_LAGS, methods=['pearson','spearman'], n_jobs=-1):
     names = sorted(vars_dict.keys())
