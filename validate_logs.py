@@ -10,7 +10,7 @@ from dropbox.files import WriteMode
 from excel_updater import update_combined_excel
 from symptoms_page import symptoms_page
 from heart_rate_page import hr_page
-from correlation_page import find_correlations, lag_series
+from correlation_page import correlation_page  # import the function
 import importlib
 import excel_updater
 import pandas as pd
@@ -1358,11 +1358,17 @@ def view_data_page():
     elif subpage == "Other":
         st.info("Other data views coming soon.")
 
-# --- Sidebar Navigation ---
+# Create Dropbox client once
+dbx = dropbox.Dropbox(
+    oauth2_refresh_token=st.secrets["dropbox_refresh_token"],
+    app_key=st.secrets["dropbox_app_key"],
+    app_secret=st.secrets["dropbox_app_secret"]
+)
+
 PAGES = {
     "Validate Logs": validate_logs_page,
     "View Data": view_data_page,
-    "Correlations": lambda: correlation_page(dbx)
+    "Correlations": lambda: correlation_page(dbx)  # pass Dropbox client
 }
 
 st.sidebar.title("Navigation")
