@@ -29,6 +29,8 @@ def point_series_to_hourly(series, hourly_index, method='nearest'):
     if method == 'nearest':
         snapped = series.copy()
         snapped.index = snapped.index.round('H')
+        # Convert to numeric, coerce errors
+        snapped = pd.to_numeric(snapped, errors='coerce')
         snapped = snapped.groupby(snapped.index).mean()
         snapped = snapped.reindex(hourly_index, fill_value=np.nan)
         out.update(snapped)
