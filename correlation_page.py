@@ -1,95 +1,91 @@
-# correlation_page.py
 import streamlit as st
 import pandas as pd
-import numpy as np
 from correlation_engine import find_correlations
-from load_excel import load_excel_from_dropbox
 
-def correlation_page(dbx):
-    st.title("📊 Time-lagged Correlation Explorer")
+def correlation_page(dbx=None, sheets_dict=None):
+    """
+    Streamlit page for running time-lagged correlations between two variables.
+    
+    Inputs:
+      - dbx: optional Dropbox object (if needed to reload files)
+      - sheets_dict: optional preloaded dict of dataframes (e.g., from Excel)
+    """
+    st.header("Correlation Analysis")
 
-    # -------------------------
-    # Load Excel from Dropbox
-    # -------------------------
-    st.info("Loading Excel data from Dropbox...")
-    sheets_dict = load_excel_from_dropbox(dbx)
-    if not sheets_dict:
-        st.error("Failed to load sheets.")
+    # --- Load data ---
+    if sheets_dict is None:
+        st.warning("No data provided. Please load Excel data first.")
         return
 
-    # -------------------------
-    # Variable mapping
-    # -------------------------
-    def convert_to_numeric(series, col_name=None):
-        """Convert non-numeric entries (emojis, text) to numbers"""
-        if series.dtype.kind in "biufc":
-            return series
-        mapping = {
-            "⚪️": 0, "🟡": 1, "🟠": 2, "🔴": 3,
-            "A little": 1, "Some": 2, "Lots": 3,
-            "taken": 1, "skipped": 0
-        }
-        return series.map(mapping).fillna(0)
+    all_sheets = list(sheets_dict.keys())
+    sheet_to_use = st.selectbox("Select sheet to analyze", all_sheets)
 
-    # Build dropdown options for all numeric-like columns across sheets
-    VAR_MAPPING = {}
-    for sheet_name, df in sheets_dict.items():
-        time_cols = [c for c in df.columns if "time" in c.lower() or "date" in c.lower()]
-        value_cols = [c for c in df.columns if c not in time_cols and c not in ["file", "emoji", "status"]]
-        if not time_cols or not value_cols:
-            continue
-        for val_col in value_cols:
-            key = f"{sheet_name} - {val_col}"
-            VAR_MAPPING[key] = (sheet_name, val_col, time_cols[0])
+    if sheet_to_use not in sheets_dict:
+        st.warning("Selected sheet not found in data.")
+        return
 
-    # -------------------------
-    # Variable selectors
-    # -------------------------
-    varA_key = st.selectbox("Select Variable A (cause)", options=list(VAR_MAPPING.keys()))
-    varB_key = st.selectbox("Select Variable B (effect)", options=list(VAR_MAPPING.keys()))
-    sheetA, valA_col, timeA_col = VAR_MAPPING[varA_key]
-    sheetB, valB_col, timeB_col = VAR_MAPPING[varB_key]
+    df = sheets_dict[sheet_to_use].copy()
+    st.write(f"Loaded sheet `{sheet_to_use}` with {len(df)} rows.")
 
-    dfA = sheets_dict[sheetA]
-    dfB = sheets_dict[sheetB]
-    seriesA = convert_to_numeric(dfA[valA_col], valA_col)
-    seriesB = convert_to_numeric(dfB[valB_col], valB_col)
+    # --- Select columns for correlation ---
+    numeric_cols = df.select_dtypes(include="number").columns.tolist()
+    if len(numeric_cols) < 2:
+        st.warning("Not enough numeric columns to run correlation.")
+        return
 
-    # -------------------------
-    # Correlation parameters
-    # -------------------------
-    st.sidebar.header("Correlation Parameters")
-    lags_hours = st.sidebar.text_input("Lags (hours, comma-separated)", "0,1,2,6,12,24,48")
+    col_A = st.selectbox("Variable A (cause)", numeric_cols)
+    col_B = st.selectbox("Variable B (effect)", [c for c in numeric_cols if c != col_A])
+    
+    time_col = st.selectbox("Time column", df.columns)
+
+    # --- Correlation settings ---
+    lags_input = st.text_input("Lags in hours (comma-separated)", "0,1,2,6,12,24,48")
     try:
-        lags_hours = [float(x.strip()) for x in lags_hours.split(",")]
+        lags_hours = [float(x.strip()) for x in lags_input.split(",")]
     except Exception:
-        st.error("Invalid lag input! Must be comma-separated numbers.")
+        st.error("Invalid lag input")
         return
 
-    match_window_hours = st.sidebar.number_input("Match window (hours)", value=4.0, min_value=0.1)
-    min_pairs = st.sidebar.number_input("Minimum paired observations", value=10, min_value=2)
-    effect_size_thresh = st.sidebar.slider("Minimum |r| for effect size", 0.0, 1.0, 0.25)
-    alpha = st.sidebar.slider("Significance alpha", 0.001, 0.2, 0.05)
+    match_window = st.number_input("Match window in hours", min_value=0.5, max_value=24.0, value=4.0, step=0.5)
+    min_pairs = st.number_input("Minimum pairs per lag", min_value=3, value=10, step=1)
+    effect_thresh = st.number_input("Effect size threshold |r|", min_value=0.0, max_value=1.0, value=0.25, step=0.05)
 
-    # -------------------------
-    # Run correlation
-    # -------------------------
-    if st.button("Run Correlation"):
-        with st.spinner("Computing correlations..."):
-            results_df, significant_df = find_correlations(
-                seriesA, seriesB,
-                lags_hours=lags_hours,
-                match_window_hours=match_window_hours,
-                min_pairs=min_pairs,
-                effect_size_thresh=effect_size_thresh,
-                alpha=alpha
-            )
+    if st.button("Run correlations"):
+        with st.spinner("Calculating correlations..."):
+            try:
+                results_df, sig_df = find_correlations(
+                    df, df,
+                    A_time_col=time_col, B_time_col=time_col,
+                    A_value_col=col_A, B_value_col=col_B,
+                    lags_hours=lags_hours,
+                    match_window_hours=match_window,
+                    min_pairs=min_pairs,
+                    effect_size_thresh=effect_thresh
+                )
+            except Exception as e:
+                st.error(f"Error running correlations: {e}")
+                return
 
-        st.subheader("Top Results (sorted by |Pearson r|)")
-        st.dataframe(results_df.sort_values("pearson_r", key=lambda s: s.abs(), ascending=False))
+        st.subheader("All lag results")
+        st.dataframe(results_df)
 
-        st.subheader("Significant Correlations")
-        if significant_df.empty:
-            st.info("No significant correlations found under current parameters.")
+        if sig_df.empty:
+            st.info("No significant correlations found with current settings.")
         else:
-            st.dataframe(significant_df)
+            st.subheader("Significant correlations")
+            st.dataframe(sig_df)
+
+        # --- Optional plotting ---
+        st.subheader("Lag vs Pearson r plot")
+        try:
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots()
+            ax.plot(results_df["lag_hours"], results_df["pearson_r"], marker="o", label="Pearson r")
+            ax.axhline(0, color="gray", linestyle="--")
+            ax.set_xlabel("Lag (hours)")
+            ax.set_ylabel("Pearson r")
+            ax.set_title(f"{col_A} → {col_B} correlations")
+            ax.legend()
+            st.pyplot(fig)
+        except Exception as e:
+            st.warning(f"Could not generate plot: {e}")
