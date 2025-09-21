@@ -77,15 +77,46 @@ def correlation_page(dbx):
             st.warning("HR Stats or Tachy Events sheet is empty.")
             return
     
-        # Normalize times
-        df_hr = normalize_times(df_hr, "date")  # daily values
-        df_tachy = normalize_times(df_tachy, "event_start")  # event-level
+        # Normalize timestamps
+        df_hr = normalize_times(df_hr, "date")
+        df_tachy = normalize_times(df_tachy, "event_start")
     
-        # Define the variables we want to run
-        hr_metrics = {
-            "Tachy % of Day": df_hr["tachy_percent"],
-            "Tachy Event Max BPM": df_tachy["max_bpm"],
-            "Tachy Event Duration (s)": df_tachy["duration_seconds"],
+        # --- Series 1: Overall tachy_percent ---
+        series_tachy_percent = df_hr["tachy_percent"]
+    
+        # --- Series 2: Binary occurrence of tachy events ---
+        # Create a series indexed by the same time index as stairs (or activity)
+        binary_index = series_A.index  # same as stairs events
+        binary_events = pd.Series(0, index=binary_index)
+        for idx, stairs_time in enumerate(series_A.index):
+            # Check if any tachy event starts within a match window (e.g., 4 hrs)
+            window_start = stairs_time
+            window_end = stairs_time + pd.Timedelta(hours=4)
+            if ((df_tachy.index >= window_start) & (df_tachy.index <= window_end)).any():
+                binary_events.iloc[idx] = 1
+    
+        # --- Series 3: max_bpm per stairs event ---
+        max_bpm_series = pd.Series(index=binary_index, dtype=float)
+        for idx, stairs_time in enumerate(series_A.index):
+            window_start = stairs_time
+            window_end = stairs_time + pd.Timedelta(hours=4)
+            events_in_window = df_tachy[(df_tachy.index >= window_start) & (df_tachy.index <= window_end)]
+            max_bpm_series.iloc[idx] = events_in_window["max_bpm"].max() if not events_in_window.empty else None
+    
+        # --- Series 4: duration_seconds per stairs event ---
+        duration_series = pd.Series(index=binary_index, dtype=float)
+        for idx, stairs_time in enumerate(series_A.index):
+            window_start = stairs_time
+            window_end = stairs_time + pd.Timedelta(hours=4)
+            events_in_window = df_tachy[(df_tachy.index >= window_start) & (df_tachy.index <= window_end)]
+            duration_series.iloc[idx] = events_in_window["duration_seconds"].max() if not events_in_window.empty else None
+    
+        # --- Combine all series into a dictionary for looping ---
+        tachy_series_dict = {
+            "Tachy % of Day": series_tachy_percent,
+            "Tachy Event Occurrence": binary_events,
+            "Tachy Event Max BPM": max_bpm_series,
+            "Tachy Event Duration (s)": duration_series
         }
     
         results = []
