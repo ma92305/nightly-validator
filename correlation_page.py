@@ -100,10 +100,24 @@ def correlation_page(dbx):
             alpha=0.05,
             random_state=42,
         )
-
+    
+        # Label variables clearly
+        var_a_name = f"Activity - {var_A_col}"
+        var_b_name = f"Heart Rate - {var_B_col}"
+    
+        res_df["Var_A"] = var_a_name
+        res_df["Var_B"] = var_b_name
+        sig_df["Var_A"] = var_a_name
+        sig_df["Var_B"] = var_b_name
+    
+        # Reorder so labels come first
+        cols = ["Var_A", "Var_B"] + [c for c in res_df.columns if c not in ["Var_A", "Var_B"]]
+        res_df = res_df[cols]
+        sig_df = sig_df[cols]
+    
         st.subheader("Correlation Results")
         st.dataframe(res_df)
-
+    
         st.subheader("Significant Correlations")
         if not sig_df.empty:
             st.dataframe(sig_df)
