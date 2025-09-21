@@ -2,6 +2,7 @@
 
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from correlation_engine import find_correlations
 from load_excel import load_excel_from_dropbox
 
@@ -14,37 +15,110 @@ def correlation_page(dbx):
         st.error("No data provided. Please load Excel data first.")
         return
 
-    # Example: using Heart Rate and Sleep Stats
-    hr_df = sheets.get("HR Stats", pd.DataFrame())
-    sleep_df = sheets.get("Sleep Stats", pd.DataFrame())
+    # --- Define variable structure ---
+    variable_map = {
+        "Conditions": {"item": ("Conditions", "item")},
+        "Activity": {
+            "Stairs": ("Activity", "Stairs_Quantity"),
+            "Walking Long": ("Activity", "Walking_Long"),
+            "Walking Brisk": ("Activity", "Walking_Brisk"),
+            "Standing": ("Activity", "Standing_Duration")
+        },
+        "Medications": {
+            "Name": ("Meds", "name"),
+            "Status": ("Meds", "status"),
+            "Dose": ("Meds", "dose")
+        },
+        "Nutrition": {
+            "Ingredients": ("Nutrition - General", "Item"),
+            "Liquids": ("Nutrition - Liquids", "amount"),
+            "Meals": ("Nutrition - Meals", "amount")
+        },
+        "Heart Rate": {
+            "Tachy_percent": ("HR Stats", "tachy_percent"),
+            "HR_max": ("HR Stats", "HR_max"),
+            "HR_avg": ("HR Stats", "HR_avg"),
+            "HR_min": ("HR Stats", "HR_min"),
+            "HRV": ("HR Stats", "HRV")
+        },
+        "Weather": {
+            "Temp High": ("Weather Stats", "temp_high"),
+            "Temp Low": ("Weather Stats", "temp_low"),
+            "Temp Avg": ("Weather Stats", "temp_avg"),
+            "Humidity Avg": ("Weather Stats", "humidity_avg"),
+            "Pressure Avg": ("Weather Stats", "pressure_avg"),
+            "Precipitation Hours": ("Weather Stats", "precipitation_hours")
+        },
+        "Sleep Stats": {
+            "Duration": ("Sleep Stats", "duration"),
+            "Score": ("Sleep Stats", "score"),
+            "Bedtime": ("Sleep Stats", "bedtime"),
+            "Waketime": ("Sleep Stats", "waketime"),
+            "REM": ("Sleep Stats", "rem_time"),
+            "Core": ("Sleep Stats", "core_time"),
+            "Deep": ("Sleep Stats", "deep_time"),
+            "Awake": ("Sleep Stats", "awake_time")
+        }
+    }
 
-    if hr_df.empty or sleep_df.empty:
-        st.warning("Heart Rate or Sleep Stats sheet is empty.")
+    # --- Variable A/B dropdowns ---
+    st.subheader("Select Variables to Correlate")
+    var_A_cat = st.selectbox("Variable A Category", list(variable_map.keys()))
+    var_B_cat = st.selectbox("Variable B Category", list(variable_map.keys()))
+
+    var_A_col = st.selectbox(
+        f"Variable A Column ({var_A_cat})", 
+        list(variable_map[var_A_cat].keys())
+    )
+    var_B_col = st.selectbox(
+        f"Variable B Column ({var_B_cat})", 
+        list(variable_map[var_B_cat].keys())
+    )
+
+    # --- Extract sheet & column ---
+    sheet_A, col_A = variable_map[var_A_cat][var_A_col]
+    sheet_B, col_B = variable_map[var_B_cat][var_B_col]
+
+    df_A = sheets.get(sheet_A, pd.DataFrame())
+    df_B = sheets.get(sheet_B, pd.DataFrame())
+
+    if df_A.empty or df_B.empty:
+        st.warning(f"Selected sheets {sheet_A} or {sheet_B} are empty.")
         return
 
-    # Convert date/time columns
-    for col in ["date", "time", "bedtime", "waketime"]:
-        if col in hr_df.columns:
-            hr_df[col] = pd.to_datetime(hr_df[col], errors="coerce")
-        if col in sleep_df.columns:
-            sleep_df[col] = pd.to_datetime(sleep_df[col], errors="coerce")
+    # --- Convert time/date columns ---
+    for df in [df_A, df_B]:
+        for col in df.columns:
+            if "time" in col.lower() or "date" in col.lower():
+                df[col] = pd.to_datetime(df[col], errors="coerce")
 
-    # Select variables for correlation
-    st.subheader("Select variables to correlate")
-    hr_options = [c for c in hr_df.columns if hr_df[c].dtype in ["int64", "float64"]]
-    sleep_options = [c for c in sleep_df.columns if sleep_df[c].dtype in ["int64", "float64"]]
+    # --- Determine time columns ---
+    # Prefer "time" or "date" column automatically
+    time_A = next((c for c in df_A.columns if "time" in c.lower() or "date" in c.lower()), None)
+    time_B = next((c for c in df_B.columns if "time" in c.lower() or "date" in c.lower()), None)
 
-    var_A = st.selectbox("Variable A (cause)", hr_options)
-    var_B = st.selectbox("Variable B (effect)", sleep_options)
+    if not time_A or not time_B:
+        st.error("Cannot detect date/time columns for alignment.")
+        return
 
+    # --- Optionally handle durations for activities ---
+    if "Walking" in var_A_col:
+        if "Start_time" in df_A.columns and "End_time" in df_A.columns:
+            df_A["Duration"] = (df_A["End_time"] - df_A["Start_time"]).dt.total_seconds() / 60.0  # minutes
+            col_A = "Duration"
+
+    if "Walking" in var_B_col:
+        if "Start_time" in df_B.columns and "End_time" in df_B.columns:
+            df_B["Duration"] = (df_B["End_time"] - df_B["Start_time"]).dt.total_seconds() / 60.0
+            col_B = "Duration"
+
+    # --- Run correlation ---
     if st.button("Run Correlation Scan"):
-        # Align by date/time
-        A_series = hr_df.set_index("date")[var_A]
-        B_series = sleep_df.set_index("date")[var_B]
+        series_A = df_A.set_index(time_A)[col_A]
+        series_B = df_B.set_index(time_B)[col_B]
 
-        # Run correlation scan
         res_df, sig_df = find_correlations(
-            A_series, B_series,
+            series_A, series_B,
             lags_hours=[0, 1, 2, 6, 12, 24, 48],
             match_window_hours=4.0,
             min_pairs=3,
@@ -63,4 +137,3 @@ def correlation_page(dbx):
             st.dataframe(sig_df)
         else:
             st.info("No significant correlations found.")
-
