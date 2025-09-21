@@ -76,50 +76,56 @@ def correlation_page(dbx):
         if df_hr.empty or df_tachy.empty:
             st.warning("HR Stats or Tachy Events sheet is empty.")
             return
-        df_hr = normalize_times(df_hr, "date")
-        df_tachy = normalize_times(df_tachy, "event_start")
-
-        # Combine tachy_percent from HR Stats with event info
-        series_hr_percent = df_hr["tachy_percent"]
-        # Here, for simplicity, we can just use max_bpm from events
-        series_events = df_tachy["max_bpm"]
-        # Concatenate and sort by index
-        series_B = pd.concat([series_hr_percent, series_events]).sort_index()
-
-    # --- Run Correlation ---
-    if st.button("Run Correlation Scan"):
-        res_df, sig_df = find_correlations(
-            series_A,
-            series_B,
-            lags_hours=[0, 1, 2, 6, 12, 24, 48],
-            match_window_hours=4.0,
-            min_pairs=3,
-            permutation_n=500,
-            bootstrap_n=500,
-            effect_size_thresh=0.2,
-            alpha=0.05,
-            random_state=42,
-        )
     
-        # Label variables clearly
-        var_a_name = f"Activity - {var_A_col}"
-        var_b_name = f"Heart Rate - {var_B_col}"
+        # Normalize times
+        df_hr = normalize_times(df_hr, "date")  # daily values
+        df_tachy = normalize_times(df_tachy, "event_start")  # event-level
     
-        res_df["Var_A"] = var_a_name
-        res_df["Var_B"] = var_b_name
-        sig_df["Var_A"] = var_a_name
-        sig_df["Var_B"] = var_b_name
+        # Define the variables we want to run
+        hr_metrics = {
+            "Tachy % of Day": df_hr["tachy_percent"],
+            "Tachy Event Max BPM": df_tachy["max_bpm"],
+            "Tachy Event Duration (s)": df_tachy["duration_seconds"],
+        }
     
-        # Reorder so labels come first
-        cols = ["Var_A", "Var_B"] + [c for c in res_df.columns if c not in ["Var_A", "Var_B"]]
-        res_df = res_df[cols]
-        sig_df = sig_df[cols]
+        results = []
+        sig_results = []
     
-        st.subheader("Correlation Results")
-        st.dataframe(res_df)
+        if st.button("Run Correlation Scan"):
+            for metric_name, series_B in hr_metrics.items():
+                res_df, sig_df = find_correlations(
+                    series_A,
+                    series_B,
+                    lags_hours=[0, 1, 2, 6, 12, 24, 48],
+                    match_window_hours=4.0,
+                    min_pairs=3,
+                    permutation_n=500,
+                    bootstrap_n=500,
+                    effect_size_thresh=0.2,
+                    alpha=0.05,
+                    random_state=42,
+                )
     
-        st.subheader("Significant Correlations")
-        if not sig_df.empty:
-            st.dataframe(sig_df)
-        else:
-            st.info("No significant correlations found.")
+                # Label variables clearly
+                res_df["Var_A"] = f"Activity - {var_A_col}"
+                res_df["Var_B"] = f"Heart Rate - {metric_name}"
+                sig_df["Var_A"] = f"Activity - {var_A_col}"
+                sig_df["Var_B"] = f"Heart Rate - {metric_name}"
+    
+                results.append(res_df)
+                if not sig_df.empty:
+                    sig_results.append(sig_df)
+    
+            # Combine all results into one big table
+            full_res = pd.concat(results, ignore_index=True)
+            full_sig = pd.concat(sig_results, ignore_index=True) if sig_results else pd.DataFrame()
+    
+            # Display
+            st.subheader("Correlation Results")
+            st.dataframe(full_res)
+    
+            st.subheader("Significant Correlations")
+            if not full_sig.empty:
+                st.dataframe(full_sig)
+            else:
+                st.info("No significant correlations found.")
