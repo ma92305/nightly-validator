@@ -17,29 +17,33 @@ def correlation_page(dbx):
 
     # --- Define variable structure ---
     variable_map = {
-        "Conditions": {"item": ("Conditions", "item")},
+        "Conditions": {
+            "Condition": ("Conditions", "item")
+        },
         "Activity": {
             "Stairs": ("Activity", "Stairs_Quantity"),
             "Walking Long": ("Activity", "Walking_Long"),
             "Walking Brisk": ("Activity", "Walking_Brisk"),
-            "Standing": ("Activity", "Standing_Duration")
+            "Standing": ("Activity", "Standing_Duration"),
+        },
+        "Tachycardia": {
+            "Tachy %": ("HR Stats", "tachy_percent"),
+        },
+        "Daily HR Stats": {
+            "Max HR": ("HR Stats", "HR_max"),
+            "Avg HR": ("HR Stats", "HR_avg"),
+            "Min HR": ("HR Stats", "HR_min"),
+            "HRV": ("HR Stats", "HRV"),
         },
         "Medications": {
             "Name": ("Meds", "name"),
             "Status": ("Meds", "status"),
-            "Dose": ("Meds", "dose")
+            "Dose": ("Meds", "dose"),
         },
         "Nutrition": {
             "Ingredients": ("Nutrition - General", "Item"),
             "Liquids": ("Nutrition - Liquids", "amount"),
-            "Meals": ("Nutrition - Meals", "amount")
-        },
-        "Heart Rate": {
-            "Tachy_percent": ("HR Stats", "tachy_percent"),
-            "HR_max": ("HR Stats", "HR_max"),
-            "HR_avg": ("HR Stats", "HR_avg"),
-            "HR_min": ("HR Stats", "HR_min"),
-            "HRV": ("HR Stats", "HRV")
+            "Meals": ("Nutrition - Meals", "amount"),
         },
         "Weather": {
             "Temp High": ("Weather Stats", "temp_high"),
@@ -47,7 +51,7 @@ def correlation_page(dbx):
             "Temp Avg": ("Weather Stats", "temp_avg"),
             "Humidity Avg": ("Weather Stats", "humidity_avg"),
             "Pressure Avg": ("Weather Stats", "pressure_avg"),
-            "Precipitation Hours": ("Weather Stats", "precipitation_hours")
+            "Precipitation Hours": ("Weather Stats", "precipitation_hours"),
         },
         "Sleep Stats": {
             "Duration": ("Sleep Stats", "duration"),
@@ -57,22 +61,24 @@ def correlation_page(dbx):
             "REM": ("Sleep Stats", "rem_time"),
             "Core": ("Sleep Stats", "core_time"),
             "Deep": ("Sleep Stats", "deep_time"),
-            "Awake": ("Sleep Stats", "awake_time")
-        }
+            "Awake": ("Sleep Stats", "awake_time"),
+        },
     }
 
     # --- Variable A/B dropdowns ---
     st.subheader("Select Variables to Correlate")
-    var_A_cat = st.selectbox("Variable A Category", list(variable_map.keys()))
-    var_B_cat = st.selectbox("Variable B Category", list(variable_map.keys()))
+    var_A_cat = st.selectbox("Variable A Category", list(variable_map.keys()), key="var_A_cat")
+    var_B_cat = st.selectbox("Variable B Category", list(variable_map.keys()), key="var_B_cat")
 
     var_A_col = st.selectbox(
-        f"Variable A Column ({var_A_cat})", 
-        list(variable_map[var_A_cat].keys())
+        f"Variable A Column ({var_A_cat})",
+        list(variable_map[var_A_cat].keys()),
+        key="var_A_col"
     )
     var_B_col = st.selectbox(
-        f"Variable B Column ({var_B_cat})", 
-        list(variable_map[var_B_cat].keys())
+        f"Variable B Column ({var_B_cat})",
+        list(variable_map[var_B_cat].keys()),
+        key="var_B_col"
     )
 
     # --- Extract sheet & column ---
@@ -93,7 +99,6 @@ def correlation_page(dbx):
                 df[col] = pd.to_datetime(df[col], errors="coerce")
 
     # --- Determine time columns ---
-    # Prefer "time" or "date" column automatically
     time_A = next((c for c in df_A.columns if "time" in c.lower() or "date" in c.lower()), None)
     time_B = next((c for c in df_B.columns if "time" in c.lower() or "date" in c.lower()), None)
 
@@ -101,10 +106,10 @@ def correlation_page(dbx):
         st.error("Cannot detect date/time columns for alignment.")
         return
 
-    # --- Optionally handle durations for activities ---
+    # --- Handle Activity durations ---
     if "Walking" in var_A_col:
         if "Start_time" in df_A.columns and "End_time" in df_A.columns:
-            df_A["Duration"] = (df_A["End_time"] - df_A["Start_time"]).dt.total_seconds() / 60.0  # minutes
+            df_A["Duration"] = (df_A["End_time"] - df_A["Start_time"]).dt.total_seconds() / 60.0
             col_A = "Duration"
 
     if "Walking" in var_B_col:
@@ -118,7 +123,8 @@ def correlation_page(dbx):
         series_B = df_B.set_index(time_B)[col_B]
 
         res_df, sig_df = find_correlations(
-            series_A, series_B,
+            series_A,
+            series_B,
             lags_hours=[0, 1, 2, 6, 12, 24, 48],
             match_window_hours=4.0,
             min_pairs=3,
@@ -126,7 +132,7 @@ def correlation_page(dbx):
             bootstrap_n=500,
             effect_size_thresh=0.2,
             alpha=0.05,
-            random_state=42
+            random_state=42,
         )
 
         st.subheader("Correlation Results")
