@@ -6,8 +6,29 @@ from datetime import datetime
 from correlation_engine import find_correlations
 from load_excel import load_excel_from_dropbox
 
+# --- Helper function to normalize times ---
+def normalize_times(df, time_col, round_to="min"):
+    """
+    Convert a time column to a DatetimeIndex and round to the desired resolution.
+    Returns a pd.DataFrame indexed by normalized datetime.
+    """
+    if time_col not in df.columns:
+        raise ValueError(f"Time column '{time_col}' not found in DataFrame")
+    
+    df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
+    df = df.dropna(subset=[time_col])
+    
+    if round_to == "min":
+        df[time_col] = df[time_col].dt.floor("T")
+    elif round_to == "s":
+        df[time_col] = df[time_col].dt.floor("S")
+    elif round_to == "H":
+        df[time_col] = df[time_col].dt.floor("H")
+    
+    return df.set_index(time_col)
+
 def correlation_page(dbx):
-    st.header("Activity vs Heart Rate Correlations")
+    st.header("Activity ↔ Heart Rate Correlations")
 
     # --- Load Excel data from Dropbox ---
     sheets = load_excel_from_dropbox(dbx)
@@ -16,83 +37,69 @@ def correlation_page(dbx):
         return
 
     # --- Define simplified variable structure ---
-    variable_A_map = {
-        "Stairs": ("Stairs", ["Time", "Quantity"]),
-        "Standing": ("Standing", ["Start_time", "Duration"]),
-        "Walking": ("Walking", ["Start_time", "Steps", "Steps/min", "Item"]),
+    variable_map_A = {
+        "Stairs": ("Stairs", "Quantity"),
+        "Standing": ("Standing", "Duration"),
+        "Walking": ("Walking", "Steps"),  # or "Steps/min" if preferred
     }
 
-    variable_B_map = {
-        "Tachycardia": (["Tachy Events", "HR Stats"], ["event_start", "duration_seconds", "max_bpm", "tachy_percent"]),
-        "Daily HR Stats": (["HR Stats"], ["date", "HR_max", "HR_avg", "HR_min", "HRV"]),
+    variable_map_B = {
+        "Tachycardia": ("Tachy Events", ["event_start", "duration_seconds", "max_bpm"], "HR Stats", "tachy_percent"),
+        "Daily HR Stats": ("HR Stats", ["HR_max", "HR_avg", "HR_min", "HRV"], None, None),
     }
 
-    # --- Variable A/B dropdowns ---
-    st.subheader("Select Variables to Correlate")
-    var_A_col = st.selectbox("Variable A", list(variable_A_map.keys()))
-    var_B_col = st.selectbox("Variable B", list(variable_B_map.keys()))
+    # --- Variable A dropdowns ---
+    st.subheader("Select Activity Variable")
+    var_A_col = st.selectbox("Activity Type", list(variable_map_A.keys()))
 
-    # --- Load DataFrames based on selections ---
-    sheet_A_name, sheet_A_cols = variable_A_map[var_A_col]
+    # --- Variable B dropdowns ---
+    st.subheader("Select Heart Rate Variable")
+    var_B_col = st.selectbox("Heart Rate Type", list(variable_map_B.keys()))
+
+    # --- Load selected sheets ---
+    sheet_A_name, col_A = variable_map_A[var_A_col]
     df_A = sheets.get(sheet_A_name, pd.DataFrame())
     if df_A.empty:
         st.warning(f"Activity sheet '{sheet_A_name}' is empty.")
         return
 
-    sheet_B_names, sheet_B_cols = variable_B_map[var_B_col]
-    # If multiple sheets (Tachycardia), concatenate
-    df_B_list = [sheets.get(s, pd.DataFrame()) for s in sheet_B_names]
-    df_B = pd.concat(df_B_list, ignore_index=True)
-    if df_B.empty:
-        st.warning(f"Heart Rate sheets '{sheet_B_names}' are empty.")
-        return
-
-    # --- Convert date/time columns ---
-    for df in [df_A, df_B]:
-        for col in df.columns:
-            if "time" in col.lower() or "date" in col.lower() or "start" in col.lower():
-                df[col] = pd.to_datetime(df[col], errors="coerce")
-
-    # --- Coerce numeric columns ---
-    numeric_cols_A = ["Quantity", "Duration", "Steps", "Steps/min"]
-    numeric_cols_B = ["tachy_percent", "HR_max", "HR_avg", "HR_min", "HRV", "duration_seconds", "max_bpm"]
-    for col in numeric_cols_A:
-        if col in df_A.columns:
-            df_A[col] = pd.to_numeric(df_A[col], errors="coerce")
-    for col in numeric_cols_B:
-        if col in df_B.columns:
-            df_B[col] = pd.to_numeric(df_B[col], errors="coerce")
-
-    # --- Handle Walking duration if needed ---
-    if var_A_col == "Walking" and "Start_time" in df_A.columns and "End_time" in df_A.columns:
-        df_A["Duration"] = (df_A["End_time"] - df_A["Start_time"]).dt.total_seconds() / 60.0
-
-    # --- Determine time columns for alignment ---
-    time_A = next((c for c in df_A.columns if "time" in c.lower() or "date" in c.lower() or "start" in c.lower()), None)
-    time_B = next((c for c in df_B.columns if "time" in c.lower() or "date" in c.lower() or "start" in c.lower()), None)
-    if not time_A or not time_B:
-        st.error("Cannot detect date/time columns for alignment.")
-        return
-
-    # --- Select column to correlate ---
-    if var_A_col == "Stairs":
-        col_A = "Quantity"
-    elif var_A_col == "Standing":
-        col_A = "Duration"
-    else:  # Walking
-        col_A = "Steps"
-
+    # --- Variable B setup ---
     if var_B_col == "Tachycardia":
-        # Use tachy_percent from HR Stats for continuous correlation
-        col_B = "tachy_percent"
-    else:  # Daily HR Stats
-        col_B = "HR_avg"
+        tachy_sheet, tachy_cols, hr_sheet, hr_col = variable_map_B[var_B_col]
+        df_tachy = sheets.get(tachy_sheet, pd.DataFrame())
+        df_hr = sheets.get(hr_sheet, pd.DataFrame())
+        if df_tachy.empty and df_hr.empty:
+            st.warning("No Tachycardia or HR percent data found.")
+            return
+        # For now just combine tachy events into single series (max_bpm per event_start)
+        df_tachy["event_start"] = pd.to_datetime(df_tachy["event_start"], errors="coerce")
+        df_tachy = df_tachy.dropna(subset=["event_start"])
+        series_B = df_tachy.set_index("event_start")["max_bpm"]
+        # append tachy_percent from HR Stats as another series if needed
+        df_hr["Date"] = pd.to_datetime(df_hr["Date"], errors="coerce")
+        df_hr = df_hr.dropna(subset=["Date"])
+        series_hr_percent = df_hr.set_index("Date")["tachy_percent"]
+        # Combine by reindexing both onto a common time axis later in find_correlations
+    else:
+        hr_sheet, hr_cols, _, _ = variable_map_B[var_B_col]
+        df_hr = sheets.get(hr_sheet, pd.DataFrame())
+        if df_hr.empty:
+            st.warning(f"Heart Rate sheet '{hr_sheet}' is empty.")
+            return
+        df_hr["Date"] = pd.to_datetime(df_hr["Date"], errors="coerce")
+        df_hr = df_hr.dropna(subset=["Date"])
+        series_B = df_hr.set_index("Date")[hr_cols[0]]  # default to HR_max for simplicity
+
+    # --- Normalize times ---
+    time_col_A = "Time" if var_A_col == "Stairs" else "Start_time"
+    df_A = normalize_times(df_A, time_col_A)
+    series_A = df_A[col_A]
+
+    series_B = series_B.sort_index()
+    series_A = series_A.sort_index()
 
     # --- Run correlation ---
     if st.button("Run Correlation Scan"):
-        series_A = df_A.set_index(time_A)[col_A]
-        series_B = df_B.set_index(time_B)[col_B]
-
         res_df, sig_df = find_correlations(
             series_A,
             series_B,
