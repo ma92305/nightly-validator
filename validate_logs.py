@@ -1368,7 +1368,7 @@ dbx = dropbox.Dropbox(
 PAGES = {
     "Validate Logs": validate_logs_page,
     "View Data": view_data_page,
-    "Correlations": correlation_page  # no parentheses, no argument
+    "Correlations": lambda: correlation_page(dbx),  # pass your Dropbox client here
 }
 
 st.sidebar.title("Navigation")
