@@ -1,187 +1,176 @@
-# correlation_page.py
-
-import streamlit as st
+# --- CORRELATION PAGE (updated) ---
+import os
 import pandas as pd
 import numpy as np
-from correlation_engine import find_correlations
-from load_excel import load_excel_from_dropbox
+import streamlit as st
+from joblib import Parallel, delayed
+from scipy.stats import pearsonr, spearmanr
+import matplotlib.pyplot as plt
+import seaborn as sns
+import statsmodels.api as sm
 
-# --- Helper to normalize time columns ---
-def normalize_times(df, time_col):
-    """
-    Convert a column to pandas datetime, drop NaNs, sort, and set as index.
-    """
-    df = df.copy()
-    df = df.dropna(subset=[time_col])
-    df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
-    df = df.dropna(subset=[time_col])
-    df = df.sort_values(time_col)
-    df = df.set_index(time_col)
-    return df
+CORR_CACHE_PATH = "/Users/melinaahmad/Library/Mobile Documents/com~apple~CloudDocs/Shortcuts/New/corr_cache.parquet"
+HOUR_LAGS = [0,1,2,3,4,5,6,8,12] + [24*d for d in range(1,8)]  # 1-7 days
 
-# --- Helper to find the correct time column ---
-def get_time_col(df):
-    for col in ["Time", "Start_time", "DateTime", "date"]:
-        if col in df.columns:
-            return col
-    raise ValueError(f"No recognized time column in dataframe. Columns: {df.columns.tolist()}")
+# --- Variable builder using new logic ---
+@st.cache_data
+def build_vars_new(data, hourly_index):
+    # Use your optimized build_all_variables_optimized
+    return build_all_variables_optimized(data, hourly_index)
 
-# --- Aggregate daily stairs ---
-def aggregate_daily_stairs(df, quantity_col):
-    time_col = get_time_col(df)
-    df = normalize_times(df, time_col)
-    df = df.dropna(subset=[quantity_col])
-    daily_total = df[quantity_col].resample("D").sum()
-    daily_total.index = pd.to_datetime(daily_total.index)
-    return daily_total
+# --- Cached correlations loader ---
+def load_cached_correlations(cache_path=CORR_CACHE_PATH):
+    if os.path.exists(cache_path):
+        try:
+            df = pd.read_parquet(cache_path)
+            return df
+        except:
+            return None
+    return None
 
-# --- Main correlation page ---
-def correlation_page(dbx):
-    st.header("Activity ↔ Heart Rate Correlations")
+# --- Categorize variables ---
+def categorize_var(name):
+    if name.startswith('Symptom: ') or name == 'Symptom Total Score':
+        return 'Symptoms'
+    elif name.startswith('Condition: '):
+        return 'Conditions'
+    elif name.startswith(('temp_', 'humidity_', 'pressure_','Hourly ')):
+        return 'Weather'
+    elif name.startswith(('Sleep ', 'Wake ', 'Bedtime')):
+        return 'Sleep'
+    elif name.startswith(('Heart Rate', 'Tachycardia', 'HRV')):
+        return 'Heart Rate'
+    elif name.startswith(('Nutrition Item:', 'Meal Amount', 'Water ')):
+        return 'Nutrition'
+    elif name.startswith(('Stairs', 'Standing', 'Walking', 'Steps')):
+        return 'General'
+    else:
+        return 'Other'
 
-    # --- Load Excel data ---
-    sheets = load_excel_from_dropbox(dbx)
-    if not sheets:
-        st.error("No data loaded. Please upload Excel data first.")
+# --- Streamlit correlation page ---
+# --- Streamlit correlation page (no cache) ---
+def correlation_page():
+    st.header("Correlation Explorer with Scenarios")
+
+    # --- Determine global time range from loaded data ---
+    all_times = []
+    for name, df_ in data.items():
+        for col in df_.columns:
+            if 'time' in col.lower() or 'date' in col.lower():
+                try:
+                    t = pd.to_datetime(df_[col], errors='coerce')
+                    if not t.empty:
+                        all_times.append(t.min())
+                        all_times.append(t.max())
+                except:
+                    pass
+    all_times = [t for t in all_times if pd.notna(t)]
+    if not all_times:
+        st.write("No datetime data found in your sheets.")
+        return
+    start, end = min(all_times), max(all_times)
+    st.write(f"Data range detected: {pd.to_datetime(start).date()} → {pd.to_datetime(end).date()}")
+
+    # --- User selects date range ---
+    col1, col2 = st.columns(2)
+    with col1:
+        user_start = st.date_input("Start date:", value=pd.to_datetime(start).date())
+    with col2:
+        user_end = st.date_input("End date:", value=pd.to_datetime(end).date())
+
+    hourly_index = to_hourly_index(user_start, user_end)
+
+    st.info("Building variables (optimized)...")
+    vars_dict = build_all_variables_optimized(data, hourly_index)
+    st.write(f"Built {len(vars_dict)} variables.")
+
+    # --- Variable categorization ---
+    var_categories = {v: categorize_var(v) for v in vars_dict.keys()}
+
+    # --- Correlation scenario selection ---
+    scenario = st.selectbox("Select Correlation Scenario:", list(CORRELATION_SCENARIOS.keys()))
+    sc = CORRELATION_SCENARIOS[scenario]
+
+    # --- Filter variables per scenario ---
+    selected_vars = [v for v in vars_dict if var_categories.get(v,'Other') in sc['groups']]
+    filtered_vars_dict = {k: vars_dict[k] for k in selected_vars}
+
+    # --- Lags ---
+    lags_choice = st.multiselect("Select lags (hours):", sc['lags'], default=sc['lags'])
+
+    min_abs_r = st.slider("Minimum absolute correlation to show:", 0.0, 1.0, 0.25, 0.01)
+    p_threshold = st.number_input("Max p-value to show (NaN = ignore):", value=0.05, format="%.3f")
+
+    # --- Compute correlations on the fly ---
+    st.info("Computing correlations (this may take a moment)...")
+    all_corr = compute_all_pairwise_correlations_optimized(filtered_vars_dict, lags_hours=lags_choice)
+
+    if all_corr is None or all_corr.empty:
+        st.write("No correlations found.")
         return
 
-    # --- Variable A / Activity options ---
-    var_A_options = ["Stairs", "Standing", "Walking"]
-    var_A_col = st.selectbox("Select Activity", var_A_options)
+    # --- Filtering as before ---
+    all_corr = all_corr[~((all_corr['var_a']==all_corr['var_b']) & (all_corr['lag_hours']==0))]
+    if not sc.get('allow_within_group', True):
+        all_corr = all_corr[~all_corr.apply(lambda r: var_categories.get(r['var_a'])==var_categories.get(r['var_b']), axis=1)]
+    all_corr = all_corr[all_corr['n']>=6]
+    if p_threshold is not None:
+        all_corr = all_corr[(all_corr['p'].isna()) | (all_corr['p']<=p_threshold)]
+    all_corr = all_corr[all_corr['r'].abs()>=min_abs_r]
 
-    # --- Variable B / Heart Rate options ---
-    var_B_options = ["Tachycardia", "Daily HR Stats"]
-    var_B_col = st.selectbox("Select Heart Rate Metric", var_B_options)
+    st.write(f"{len(all_corr)} correlations matching filters.")
 
-    # --- Extract Activity Data ---
-    if var_A_col == "Stairs":
-        df_A = sheets.get("Stairs", pd.DataFrame())
-        if df_A.empty:
-            st.warning("Stairs sheet is empty.")
+    # --- Summary generation (reuse old logic) ---
+    corr_df = all_corr.rename(columns={'var_a':'Variable X','var_b':'Variable Y','r':'Correlation','p':'P-Value','n':'N'})
+
+    def generate_summary(corr_df):
+        summaries=[]
+        filtered_df = corr_df[(corr_df['P-Value']<=0.05)&(corr_df['N']>=20)]
+        grouped = filtered_df.groupby(['Variable X','Variable Y'])
+        for (var1,var2), group in grouped:
+            best_row = group.loc[group['P-Value'].idxmin()]
+            corr = best_row['Correlation']
+            p_value = best_row['P-Value']
+            n = best_row['N']
+            best_lag = best_row.get('lag_hours',0)
+            direction = "increase" if corr>0 else "decrease"
+            lag_str = f" {best_lag}h later" if best_lag>0 else f" {abs(best_lag)}h earlier" if best_lag<0 else ""
+            summaries.append(f"An increase in {var1} is associated with a {direction} in {var2}{lag_str} (p={p_value:.3f}, n={n})")
+        return summaries
+
+    summary_list = generate_summary(corr_df)
+    if summary_list:
+        st.subheader("Summary of Likely Real Correlations")
+        for s in summary_list:
+            st.write(f"- {s}")
+    else:
+        st.info("No strong statistically significant correlations found.")
+
+    # --- Display table or heatmap ---
+    view = st.radio("View as:", ['Heatmap (single lag)','Top correlations table'], index=1)
+    if view.startswith('Heatmap'):
+        chosen_lag = st.selectbox("Choose lag (hours) to display:", sorted(all_corr['lag_hours'].unique()))
+        chosen_method = st.selectbox("Choose method:", ['pearson','spearman'])
+        subset = all_corr[(all_corr['lag_hours']==chosen_lag)&(all_corr['method']==chosen_method)]
+        if subset.empty:
+            st.write("No results for this lag/method with current filters.")
             return
-        df_A = df_A.dropna(subset=["Time", "Quantity"])
-        time_col = get_time_col(df_A)
-        df_A = normalize_times(df_A, time_col)
-        event_series = df_A["Quantity"]  # per-event number of stairs
-        daily_series = aggregate_daily_stairs(df_A, "Quantity")  # per-day total stairs
-
-    elif var_A_col == "Standing":
-        df_A = sheets.get("Standing", pd.DataFrame())
-        if df_A.empty:
-            st.warning("Standing sheet is empty.")
-            return
-        df_A = df_A.dropna(subset=["Time", "Duration"])
-        time_col = get_time_col(df_A)
-        df_A = normalize_times(df_A, time_col)
-        event_series = df_A["Duration"]
-        daily_series = df_A["Duration"].resample("D").sum()
-
-    elif var_A_col == "Walking":
-        df_A = sheets.get("Walking", pd.DataFrame())
-        if df_A.empty:
-            st.warning("Walking sheet is empty.")
-            return
-        df_A = df_A.dropna(subset=["Time", "Steps"])
-        time_col = get_time_col(df_A)
-        df_A = normalize_times(df_A, time_col)
-        event_series = df_A["Steps"]
-        daily_series = df_A["Steps"].resample("D").sum()
-
-    # --- Extract Heart Rate Data ---
-    df_hr = sheets.get("HR Stats", pd.DataFrame())
-    df_tachy = sheets.get("Tachy Events", pd.DataFrame())
-    if df_hr.empty or df_tachy.empty:
-        st.warning("HR Stats or Tachy Events sheet is empty.")
-        return
-
-    df_hr = normalize_times(df_hr, get_time_col(df_hr))
-    df_tachy = normalize_times(df_tachy, get_time_col(df_tachy))
-
-    # --- Prepare Tachycardia series ---
-    tachy_series_dict = {}
-
-    # 1️⃣ Daily total tachy %
-    daily_tachy_percent = df_hr["tachy_percent"].resample("D").mean()
-    daily_tachy_percent.index = pd.to_datetime(daily_tachy_percent.index)
-    tachy_series_dict["Daily Tachy %"] = daily_tachy_percent
-
-    # 2️⃣ Event-level tachy occurrence, max BPM, duration (aligned to stairs events)
-    binary_occurrence = pd.Series(0, index=event_series.index)
-    max_bpm_series = pd.Series(np.nan, index=event_series.index, dtype=float)
-    duration_series = pd.Series(np.nan, index=event_series.index, dtype=float)
-
-    for idx, event_time in enumerate(event_series.index):
-        window_start = event_time
-        window_end = event_time + pd.Timedelta(hours=4)
-        events_in_window = df_tachy[(df_tachy.index >= window_start) & (df_tachy.index <= window_end)]
-        if not events_in_window.empty:
-            binary_occurrence.iloc[idx] = 1
-            max_bpm_series.iloc[idx] = events_in_window["max_bpm"].max()
-            duration_series.iloc[idx] = events_in_window["duration_seconds"].max()
-
-    tachy_series_dict["Tachy Event Occurrence"] = binary_occurrence
-    tachy_series_dict["Tachy Event Max BPM"] = max_bpm_series
-    tachy_series_dict["Tachy Event Duration (s)"] = duration_series
-
-    # --- Run correlations ---
-    if st.button("Run Correlation Scan"):
-        all_results = []
-        all_sig = []
-
-        # Event-level correlations
-        for metric_name, series_B in tachy_series_dict.items():
-            res_df, sig_df = find_correlations(
-                event_series,
-                series_B,
-                lags_hours=[0, 1, 2, 6, 12, 24, 48],
-                match_window_hours=4.0,
-                min_pairs=3,
-                permutation_n=500,
-                bootstrap_n=500,
-                effect_size_thresh=0.2,
-                alpha=0.05,
-                random_state=42,
-            )
-            res_df["Var_A"] = f"{var_A_col} (event-level)"
-            res_df["Var_B"] = f"Heart Rate - {metric_name}"
-            sig_df["Var_A"] = f"{var_A_col} (event-level)"
-            sig_df["Var_B"] = f"Heart Rate - {metric_name}"
-            all_results.append(res_df)
-            if not sig_df.empty:
-                all_sig.append(sig_df)
-
-        # Daily-level correlation: total stairs per day ↔ daily tachy %
-        if "Daily Tachy %" in tachy_series_dict and var_A_col == "Stairs":
-            daily_series_aligned, daily_tachy_aligned = daily_series.align(daily_tachy_percent, join="inner")
-            res_df, sig_df = find_correlations(
-                daily_series_aligned,
-                daily_tachy_aligned,
-                lags_hours=[0, 24, 48, 72],  # daily lags in hours
-                match_window_hours=24,
-                min_pairs=3,
-                permutation_n=500,
-                bootstrap_n=500,
-                effect_size_thresh=0.2,
-                alpha=0.05,
-                random_state=42,
-            )
-            res_df["Var_A"] = f"{var_A_col} (daily total)"
-            res_df["Var_B"] = "Heart Rate - Daily Tachy %"
-            sig_df["Var_A"] = f"{var_A_col} (daily total)"
-            sig_df["Var_B"] = "Heart Rate - Daily Tachy %"
-            all_results.append(res_df)
-            if not sig_df.empty:
-                all_sig.append(sig_df)
-
-        # Combine results
-        full_res = pd.concat(all_results, ignore_index=True)
-        full_sig = pd.concat(all_sig, ignore_index=True) if all_sig else pd.DataFrame()
-
-        st.subheader("Correlation Results")
-        st.dataframe(full_res)
-
-        st.subheader("Significant Correlations")
-        if not full_sig.empty:
-            st.dataframe(full_sig)
-        else:
-            st.info("No significant correlations found.")
+        names = sorted(set(subset['var_a']).union(set(subset['var_b'])))
+        mat = pd.DataFrame(np.nan, index=names, columns=names)
+        for _, row in subset.iterrows():
+            mat.loc[row['var_a'], row['var_b']] = row['r']
+        fig, ax = plt.subplots(figsize=(12, max(6,len(names)*0.25)))
+        sns.heatmap(mat.astype(float), cmap='coolwarm', center=0, vmin=-1, vmax=1, annot=True, fmt=".2f", ax=ax)
+        ax.set_title(f"Correlation Matrix (lag={chosen_lag}h, method={chosen_method})")
+        plt.xticks(rotation=45, ha='right')
+        plt.yticks(rotation=0)
+        st.pyplot(fig)
+    else:
+        top_n = st.number_input("Show top N results (by |r|):", min_value=10, max_value=1000, value=100, step=10)
+        show_only_real = st.checkbox("Show only likely real correlations (p≤0.05 and n≥20)", value=True)
+        df_show = all_corr.copy()
+        if show_only_real:
+            df_show = df_show[(df_show['p']<=0.05)&(df_show['n']>=20)]
+        df_show['abs_r'] = df_show['r'].abs()
+        df_show = df_show.sort_values('abs_r', ascending=False).head(int(top_n))
+        st.dataframe(df_show[['var_a','var_b','lag_hours','method','r','p','n']])
