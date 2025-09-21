@@ -123,7 +123,7 @@ def correlation_page(dbx):
         sig_results = []
     
         if st.button("Run Correlation Scan"):
-            for metric_name, series_B in hr_metrics.items():
+            for metric_name, series_B in tachy_series_dict.items():
                 res_df, sig_df = find_correlations(
                     series_A,
                     series_B,
