@@ -83,3 +83,60 @@ def show_correlation_page(sheets):
         ax.set_xlabel("Date")
         ax.set_ylabel("Value")
         st.pyplot(fig)
+
+# --- Top correlations summary with strength labels ---
+st.markdown("---")
+st.subheader("Top correlations summary (with strength)")
+
+# Flatten correlation matrix and drop self-correlations and NaNs
+corr_flat = corr_df.copy()
+p_flat = p_df.copy()
+
+# Only upper triangle to avoid duplicates
+corr_flat = corr_flat.where(np.triu(np.ones(corr_flat.shape), k=1).astype(bool))
+summary_list = []
+
+for col1 in corr_flat.columns:
+    for col2 in corr_flat.index:
+        r = corr_flat.loc[col2, col1]
+        p = p_flat.loc[col2, col1]
+        if pd.notna(r):
+            summary_list.append({
+                'Feature 1': col1,
+                'Feature 2': col2,
+                'r': r,
+                'p': p
+            })
+
+if summary_list:
+    summary_df = pd.DataFrame(summary_list)
+    # Take top 20 by absolute correlation
+    top_corrs = summary_df.reindex(summary_df['r'].abs().sort_values(ascending=False).index).head(20)
+
+    # Human-readable descriptions with strength
+    def describe_corr(row):
+        abs_r = abs(row['r'])
+        if abs_r >= 0.8:
+            strength = "very strong"
+        elif abs_r >= 0.6:
+            strength = "strong"
+        elif abs_r >= 0.4:
+            strength = "moderate"
+        elif abs_r >= 0.2:
+            strength = "weak"
+        else:
+            strength = "very weak"
+        direction = "positively" if row['r'] > 0 else "negatively"
+        return f"{row['Feature 1']} is {direction} correlated with {row['Feature 2']} ({strength}, r={row['r']:.2f}, p={row['p']:.3f})"
+
+    top_corrs['Description'] = top_corrs.apply(describe_corr, axis=1)
+
+    # Show table
+    st.table(top_corrs[['Feature 1', 'Feature 2', 'r', 'p', 'Description']])
+
+    # Show human-readable summary
+    st.markdown("**Top correlations summary:**")
+    for desc in top_corrs['Description']:
+        st.write(f"- {desc}")
+else:
+    st.write("No correlations found.")
