@@ -79,33 +79,33 @@ def diary_style_desc(row):
     else:
         verb = "lower" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "less"
 
-        # Add human-readable thresholds/context
-        if "meals" in f1_clean:
-            sentence = f"Eating multiple meals totaling a lot in one day{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-        elif "stairs" in f1_clean:
-            sentence = f"Climbing a high number of stairs in one day{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-        elif "standing" in f1_clean:
-            sentence = f"Spending a long time standing in one day{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-        elif "Chocolate" in f1_clean:
-            sentence = f"Eating chocolate in a day{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-        elif "Caffeine" in f1_clean:
-            sentence = f"Drinking caffeine{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-        elif "Ginger" in f1_clean:
-            sentence = f"Consuming ginger{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-        elif "Cheese" in f1_clean:
-            sentence = f"Consuming cheese{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-        elif "Dairy" in f1_clean:
-            sentence = f"Consuming dairy{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-        elif "Gluten" in f1_clean:
-            sentence = f"Consuming gluten{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-        elif "Spice" in f1_clean:
-            sentence = f"Consuming spicy food{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-        elif "Oil" in f1_clean:
-            sentence = f"Consuming oil{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-        else:
-            sentence = f"{f1_clean}{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-    
-        return sentence
+    # Add human-readable thresholds/context
+    if "meals" in f1_clean:
+        sentence = f"Eating multiple meals totaling a lot in one day{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+    elif "stairs" in f1_clean:
+        sentence = f"Climbing a high number of stairs in one day{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+    elif "standing" in f1_clean:
+        sentence = f"Spending a long time standing in one day{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+    elif "Chocolate" in f1_clean:
+        sentence = f"Eating chocolate in a day{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+    elif "Caffeine" in f1_clean:
+        sentence = f"Drinking caffeine{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+    elif "Ginger" in f1_clean:
+        sentence = f"Consuming ginger{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+    elif "Cheese" in f1_clean:
+        sentence = f"Consuming cheese{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+    elif "Dairy" in f1_clean:
+        sentence = f"Consuming dairy{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+    elif "Gluten" in f1_clean:
+        sentence = f"Consuming gluten{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+    elif "Spice" in f1_clean:
+        sentence = f"Consuming spicy food{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+    elif "Oil" in f1_clean:
+        sentence = f"Consuming oil{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+    else:
+        sentence = f"{f1_clean}{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+
+    return sentence
 
         top_corrs['Description'] = top_corrs.apply(diary_style_desc, axis=1)
 
