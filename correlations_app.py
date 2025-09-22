@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from correlations import compute_daily_aggregates, compute_pairwise_correlations, compute_lagged_correlations
+from correlations import compute_daily_aggregates, compute_pairwise_cross_group_matrix, compute_lagged_correlations
 
 def show_correlation_page(sheets):
     st.title("Correlation Explorer — Health Logs")
