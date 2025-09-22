@@ -176,18 +176,23 @@ def show_correlation_page(sheets):
                     'p': p
                 })
 
+    # --- Top correlations summary ---
     if summary_list:
         summary_df = pd.DataFrame(summary_list)
         top_corrs = summary_df.reindex(summary_df['r'].abs().sort_values(ascending=False).index)
-
-        # Combined certainty metric
+    
         def compute_certainty(p, r):
             effect_score = abs(r) * 100
             p_boost = max(0, min(50, ((0.05 - p) / 0.05) * 50))
             return int(min(100, effect_score + p_boost))
-
+    
         top_corrs['certainty'] = top_corrs.apply(lambda x: compute_certainty(x['p'], x['r']), axis=1)
-
+    
+        # Define likely_real and possible **before using them**
+        likely_real = top_corrs[top_corrs['certainty'] >= 50].sort_values(by='certainty', ascending=False)
+        possible = top_corrs[(top_corrs['certainty'] >= 20) & (top_corrs['certainty'] < 50)].sort_values(by='certainty', ascending=False)
+    
+        # Apply the new threshold-aware description function
         likely_real['Description'] = likely_real.apply(lambda x: diary_style_desc_with_threshold(x, daily), axis=1)
         possible['Description'] = possible.apply(lambda x: diary_style_desc_with_threshold(x, daily), axis=1)
 
