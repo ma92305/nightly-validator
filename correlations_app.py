@@ -9,7 +9,7 @@ def show_correlation_page(sheets):
     st.title("Correlation Explorer — Health Logs")
     st.markdown(
         "This page aggregates your sheets into daily features and computes correlations. "
-        "The strongest correlations are summarized in easy-to-read plain English."
+        "The strongest correlations are summarized in easy-to-read plain English with a certainty meter."
     )
 
     # 1) Build daily aggregates
@@ -33,7 +33,7 @@ def show_correlation_page(sheets):
     method = st.radio("Correlation method", ["pearson", "spearman"], index=0)
     corr_df, p_df = compute_pairwise_cross_group_matrix(daily, method=method, min_periods=3)
 
-    # --- Diary-style description function ---
+    # --- Diary-style description with certainty meter ---
     def diary_style_desc(row):
         f1 = row['Feature 1']
         f2 = row['Feature 2']
@@ -42,7 +42,8 @@ def show_correlation_page(sheets):
         lag_note = " roughly 7 days ago" if "_7d_avg" in f1 else ""
 
         # Clean feature names
-        f1_clean = f1.replace("nutrition_", "").replace("_7d_avg", "").replace("_sum", "").replace("_minutes", " minutes").replace("_count", " count")
+        f1_clean = f1.replace("nutrition_", "").replace("_7d_avg", "").replace("_sum", "") \
+                     .replace("_minutes", " minutes").replace("_count", " count")
         f2_clean = f2.replace("HR_avg", "average heart rate")\
                      .replace("HR_max", "maximum heart rate")\
                      .replace("HRV", "HRV")\
@@ -51,35 +52,38 @@ def show_correlation_page(sheets):
 
         # Determine direction
         if row['r'] > 0:
-            verb = "higher" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "more"
+            verb = "higher" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "greater"
         else:
-            verb = "lower" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "less"
+            verb = "lower" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "lesser"
 
-        # Add human-readable thresholds/context
+        # Certainty meter display (already computed in 'certainty' column)
+        certainty = row.get('certainty', 0)
+
+        # Human-readable thresholds/context
         if "meals" in f1_clean:
-            sentence = f"Eating multiple meals totaling a lot in one day{lag_note} is linked to {verb} {f2_clean}"
+            sentence = f"Eating multiple meals totaling a lot in one day{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
         elif "stairs" in f1_clean:
-            sentence = f"Climbing a high number of stairs in one day{lag_note} is linked to {verb} {f2_clean}"
+            sentence = f"Climbing a high number of stairs in one day{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
         elif "standing" in f1_clean:
-            sentence = f"Spending a long time standing in one day{lag_note} is linked to {verb} {f2_clean}"
+            sentence = f"Spending a long time standing in one day{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
         elif "Chocolate" in f1_clean:
-            sentence = f"Eating chocolate in a day{lag_note} is linked to {verb} {f2_clean}"
+            sentence = f"Eating chocolate in a day{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
         elif "Caffeine" in f1_clean:
-            sentence = f"Drinking caffeine{lag_note} is linked to {verb} {f2_clean}"
+            sentence = f"Drinking caffeine{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
         elif "Ginger" in f1_clean:
-            sentence = f"Consuming ginger{lag_note} is linked to {verb} {f2_clean}"
+            sentence = f"Consuming ginger{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
         elif "Cheese" in f1_clean:
-            sentence = f"Consuming cheese{lag_note} is linked to {verb} {f2_clean}"
+            sentence = f"Consuming cheese{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
         elif "Dairy" in f1_clean:
-            sentence = f"Consuming dairy{lag_note} is linked to {verb} {f2_clean}"
+            sentence = f"Consuming dairy{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
         elif "Gluten" in f1_clean:
-            sentence = f"Consuming gluten{lag_note} is linked to {verb} {f2_clean}"
+            sentence = f"Consuming gluten{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
         elif "Spice" in f1_clean:
-            sentence = f"Consuming spicy food{lag_note} is linked to {verb} {f2_clean}"
+            sentence = f"Consuming spicy food{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
         elif "Oil" in f1_clean:
-            sentence = f"Consuming oil{lag_note} is linked to {verb} {f2_clean}"
+            sentence = f"Consuming oil{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
         else:
-            sentence = f"{f1_clean}{lag_note} is linked to {verb} {f2_clean}"
+            sentence = f"{f1_clean}{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
 
         return sentence
 
@@ -107,45 +111,37 @@ def show_correlation_page(sheets):
     if summary_list:
         summary_df = pd.DataFrame(summary_list)
 
-        # --- Compute certainty ---
-        summary_df['certainty'] = (summary_df['r'].abs() * (1 - summary_df['p'])).clip(lower=0) * 100
+        # --- Statistically grounded thresholds ---
+        likely_real = summary_df[(summary_df['r'].abs() >= 0.35) & (summary_df['p'] <= 0.08)]
+        possible = summary_df[((summary_df['r'].abs() >= 0.3) & (summary_df['r'].abs() < 0.35)) | ((summary_df['p'] > 0.08) & (summary_df['p'] <= 0.2))]
 
-        # Sort by certainty descending
-        summary_df = summary_df.sort_values('certainty', ascending=False)
+        # Compute certainty: combines effect size and p-value, permissive but statistically principled
+        def calc_certainty(row):
+            p_clipped = min(row['p'], 0.5)
+            return int(abs(row['r']) * (1 - p_clipped / 0.5) * 100)
 
-        # Flag categories
-        def flag_certainty(cert):
-            if cert >= 60:
-                return "likely real"
-            elif cert >= 40:
-                return "borderline"
-            else:
-                return "low"
-        summary_df['category'] = summary_df['certainty'].apply(flag_certainty)
+        likely_real['certainty'] = likely_real.apply(calc_certainty, axis=1)
+        possible['certainty'] = possible.apply(calc_certainty, axis=1)
 
-        # Separate lists
-        likely_real = summary_df[summary_df['category'] == "likely real"]
-        possible = summary_df[summary_df['category'] == "borderline"]
+        # Sort by certainty descending, then by absolute correlation descending
+        likely_real = likely_real.sort_values(by=['certainty', 'r'], ascending=[False, False])
+        possible = possible.sort_values(by=['certainty', 'r'], ascending=[False, False])
 
-        # Apply diary-style descriptions
-        likely_real['Description'] = likely_real.apply(diary_style_desc, axis=1)
-        possible['Description'] = possible.apply(diary_style_desc, axis=1)
-
-        # Display sorted by certainty
         st.subheader("Likely real correlations")
         if not likely_real.empty:
-            for _, row in likely_real.iterrows():
-                st.write(f"- {row['Description']} — Certainty: {int(row['certainty'])}/100")
+            likely_real['Description'] = likely_real.apply(diary_style_desc, axis=1)
+            for desc in likely_real['Description']:
+                st.write(f"- {desc}")
         else:
             st.write("No strong correlations found.")
 
         st.subheader("Possible correlations (borderline)")
         if not possible.empty:
-            for _, row in possible.iterrows():
-                st.write(f"- {row['Description']} — Certainty: {int(row['certainty'])}/100")
+            possible['Description'] = possible.apply(diary_style_desc, axis=1)
+            for desc in possible['Description']:
+                st.write(f"- {desc}")
         else:
             st.write("No borderline correlations found.")
-
     else:
         st.write("No correlations found.")
 
