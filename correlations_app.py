@@ -115,13 +115,20 @@ def show_correlation_page(sheets):
         summary_df = pd.DataFrame(summary_list)
         top_corrs = summary_df.reindex(summary_df['r'].abs().sort_values(ascending=False).index)
 
-        # --- Statistically grounded thresholds and sorting ---
+        # --- Statistically grounded thresholds and sorting by certainty ---
         likely_real = top_corrs[(top_corrs['r'].abs() >= 0.35) & (top_corrs['p'] <= 0.05)]
         possible = top_corrs[((top_corrs['r'].abs() >= 0.3) & (top_corrs['r'].abs() < 0.35)) | ((top_corrs['p'] > 0.05) & (top_corrs['p'] <= 0.08))]
-
-        # Sort each by absolute correlation descending
-        likely_real = likely_real.reindex(likely_real['r'].abs().sort_values(ascending=False).index)
-        possible = possible.reindex(possible['r'].abs().sort_values(ascending=False).index)
+        
+        # Compute certainty for sorting
+        def calc_certainty(p):
+            return int((1 - p/0.05)*100) if p <= 0.05 else 0
+        
+        likely_real['certainty'] = likely_real['p'].apply(calc_certainty)
+        possible['certainty'] = possible['p'].apply(calc_certainty)
+        
+        # Sort by certainty descending, then by absolute correlation descending
+        likely_real = likely_real.sort_values(by=['certainty', 'r'], ascending=[False, False])
+        possible = possible.sort_values(by=['certainty', 'r'], ascending=[False, False])
 
         st.subheader("Likely real correlations")
         if not likely_real.empty:
