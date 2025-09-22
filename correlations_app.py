@@ -108,10 +108,14 @@ def show_correlation_page(sheets):
         summary_df = pd.DataFrame(summary_list)
         top_corrs = summary_df.reindex(summary_df['r'].abs().sort_values(ascending=False).index)
 
-        # --- Statistically grounded thresholds ---
+        # --- Statistically grounded thresholds and sorting ---
         likely_real = top_corrs[(top_corrs['r'].abs() >= 0.35) & (top_corrs['p'] <= 0.05)]
         possible = top_corrs[((top_corrs['r'].abs() >= 0.3) & (top_corrs['r'].abs() < 0.35)) | ((top_corrs['p'] > 0.05) & (top_corrs['p'] <= 0.08))]
-
+        
+        # Sort each by absolute correlation descending
+        likely_real = likely_real.reindex(likely_real['r'].abs().sort_values(ascending=False).index)
+        possible = possible.reindex(possible['r'].abs().sort_values(ascending=False).index)
+        
         st.subheader("Likely real correlations")
         if not likely_real.empty:
             likely_real['Description'] = likely_real.apply(diary_style_desc, axis=1)
@@ -119,7 +123,7 @@ def show_correlation_page(sheets):
                 st.write(f"- {desc}")
         else:
             st.write("No strong correlations found.")
-
+        
         st.subheader("Possible correlations (borderline)")
         if not possible.empty:
             possible['Description'] = possible.apply(diary_style_desc, axis=1)
