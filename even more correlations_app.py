@@ -8,7 +8,7 @@ def show_correlation_page(sheets):
     st.title("Correlation Explorer — Health Logs")
     st.markdown(
         "This page aggregates your sheets into daily features and computes correlations. "
-        "The top correlations are automatically summarized in plain English."
+        "The strongest correlations are summarized in easy-to-read plain English."
     )
 
     # 1) Build daily aggregates
@@ -32,14 +32,14 @@ def show_correlation_page(sheets):
     method = st.radio("Correlation method", ["pearson", "spearman"], index=0)
     corr_df, p_df = compute_pairwise_cross_group_matrix(daily, method=method, min_periods=3)
 
-    # --- Top correlations summary (plain English) ---
+    # --- Top correlations summary (plain English, diary-style) ---
     st.markdown("---")
     st.subheader("Top correlations summary")
-    
+
     # Flatten correlation matrix (upper triangle only)
     corr_flat = corr_df.where(np.triu(np.ones(corr_df.shape), k=1).astype(bool))
     p_flat = p_df.where(np.triu(np.ones(p_df.shape), k=1).astype(bool))
-    
+
     summary_list = []
     for col1 in corr_flat.columns:
         for col2 in corr_flat.index:
@@ -52,39 +52,38 @@ def show_correlation_page(sheets):
                     'r': r,
                     'p': p
                 })
-    
+
     if summary_list:
         summary_df = pd.DataFrame(summary_list)
         top_corrs = summary_df.reindex(summary_df['r'].abs().sort_values(ascending=False).index).head(20)
 
-        # Plain-English, human-readable description
-        def plain_english_desc(row):
-            # Clean up feature names
-            f1 = row['Feature 1'].replace("nutrition_", "").replace("_7d_avg", "").replace("_sum", "").replace("_minutes", " minutes").replace("_count", " count")
+        # Diary-style description
+        def diary_style_desc(row):
+            # Clean feature names
+            f1 = row['Feature 1']
             f2 = row['Feature 2']
+
+            # Remove prefixes/suffixes and emojis as needed
+            f1 = f1.replace("nutrition_", "").replace("_7d_avg", "").replace("_sum", "").replace("_minutes", " minutes").replace("_count", " count")
             f2 = f2.replace("HR_avg", "average heart rate").replace("HR_max", "maximum heart rate").replace("HRV", "HRV").replace("sleep_duration", "sleep duration").replace("sleep_score", "sleep score")
 
-            # Determine natural effect wording
-            if "HR" in f2 or "HRV" in f2:
-                verb = "is associated with a higher" if row['r'] > 0 else "is associated with a lower"
-            elif "sleep" in f2:
-                verb = "is associated with longer" if row['r'] > 0 else "is associated with shorter"
+            # Lag phrasing
+            lag_note = " roughly 7 days later" if "_7d_avg" in row['Feature 1'] else ""
+
+            # Simple effect wording
+            if row['r'] > 0:
+                verb = "higher" if "HR" in f2 or "sleep" in f2 else "more"
             else:
-                verb = "is associated with higher" if row['r'] > 0 else "is associated with lower"
+                verb = "lower" if "HR" in f2 or "sleep" in f2 else "less"
 
-            # Optional: rough lag indicator if feature has '_7d_avg' removed
-            lag_note = ""
-            if "_7d_avg" in row['Feature 1']:
-                lag_note = " roughly 7 days later"
+            return f"{f1}{lag_note} is linked to {verb} {f2} (p={row['p']:.3f})"
 
-            return f"{f1}{lag_note} {verb} {f2} (p={row['p']:.3f})"
-
-        top_corrs['Description'] = top_corrs.apply(plain_english_desc, axis=1)
+        top_corrs['Description'] = top_corrs.apply(diary_style_desc, axis=1)
 
         # Show table
         st.table(top_corrs[['Feature 1', 'Feature 2', 'r', 'p', 'Description']])
 
-        # Human-readable list
+        # Diary-style list
         st.markdown("**Plain-English summary of top correlations:**")
         for desc in top_corrs['Description']:
             st.write(f"- {desc}")
