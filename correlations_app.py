@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from correlations import compute_daily_aggregates, compute_pairwise_cross_group_matrix
+import matplotlib.pyplot as plt
 
 def get_threshold_description(feature_name, daily_data):
     """
@@ -191,12 +192,30 @@ def show_correlation_page(sheets):
         # Define likely_real and possible **before using them**
         likely_real = top_corrs[top_corrs['certainty'] >= 50].sort_values(by='certainty', ascending=False)
         possible = top_corrs[(top_corrs['certainty'] >= 20) & (top_corrs['certainty'] < 50)].sort_values(by='certainty', ascending=False)
-    
+
         st.subheader("Likely real correlations")
         if not likely_real.empty:
-            likely_real['Description'] = likely_real.apply(lambda x: diary_style_desc_with_threshold(x, daily), axis=1)
-            for desc in likely_real['Description']:
-                st.write(f"- {desc}")
+            for i, row in likely_real.iterrows():
+                description = diary_style_desc_with_threshold(row, daily)
+    
+                # Use an expander so user can click to see details
+                with st.expander(description):
+                    f1 = row['Feature 1']
+                    f2 = row['Feature 2']
+                    
+                    # Scatterplot / line plot
+                    fig, ax = plt.subplots(figsize=(6,4))
+                    ax.scatter(daily[f1], daily[f2], alpha=0.6)
+                    
+                    # Optional: linear fit
+                    if len(daily[f1].dropna()) > 1:
+                        m, b = np.polyfit(daily[f1].dropna(), daily[f2].dropna(), 1)
+                        ax.plot(daily[f1], m*daily[f1] + b, color='red', linestyle='--')
+                    
+                    ax.set_xlabel(human_readable_feature(f1))
+                    ax.set_ylabel(human_readable_target(f2))
+                    ax.set_title(f"r = {row['r']:.2f}, p = {row['p']:.3f}")
+                    st.pyplot(fig)
         else:
             st.write("No strong correlations found.")
 
