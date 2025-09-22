@@ -9,7 +9,7 @@ def show_correlation_page(sheets):
     st.title("Correlation Explorer — Health Logs")
     st.markdown(
         "This page aggregates your sheets into daily features and computes correlations. "
-        "The strongest correlations are summarized in easy-to-read plain English with a certainty meter."
+        "The strongest correlations are summarized in easy-to-read plain English."
     )
 
     # 1) Build daily aggregates
@@ -33,7 +33,7 @@ def show_correlation_page(sheets):
     method = st.radio("Correlation method", ["pearson", "spearman"], index=0)
     corr_df, p_df = compute_pairwise_cross_group_matrix(daily, method=method, min_periods=3)
 
-    # --- Diary-style description with certainty meter ---
+    # --- Diary-style description function with certainty ---
     def diary_style_desc(row):
         f1 = row['Feature 1']
         f2 = row['Feature 2']
@@ -42,8 +42,7 @@ def show_correlation_page(sheets):
         lag_note = " roughly 7 days ago" if "_7d_avg" in f1 else ""
 
         # Clean feature names
-        f1_clean = f1.replace("nutrition_", "").replace("_7d_avg", "").replace("_sum", "") \
-                     .replace("_minutes", " minutes").replace("_count", " count")
+        f1_clean = f1.replace("nutrition_", "").replace("_7d_avg", "").replace("_sum", "").replace("_minutes", " minutes").replace("_count", " count")
         f2_clean = f2.replace("HR_avg", "average heart rate")\
                      .replace("HR_max", "maximum heart rate")\
                      .replace("HRV", "HRV")\
@@ -51,18 +50,14 @@ def show_correlation_page(sheets):
                      .replace("sleep_score", "sleep score")
 
         # Determine direction
-        if row['r'] > 0:
-            verb = "higher" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "greater"
-        else:
-            verb = "lower" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "lesser"
+        verb = "higher" if row['r'] > 0 and any(x in f2_clean for x in ["HR", "HRV", "sleep"]) else \
+               "lower" if row['r'] < 0 and any(x in f2_clean for x in ["HR", "HRV", "sleep"]) else \
+               "more" if row['r'] > 0 else "less"
 
-        # Certainty meter based on p-value
-        if row['p'] <= 0.05:
-            certainty = int((1 - row['p'] / 0.05) * 100)
-        else:
-            certainty = 0
+        # Compute certainty
+        certainty = max(0, min(100, int(abs(row['r']) * max(0, 1 - row['p'] / 0.05) * 100)))
 
-        # Human-readable thresholds/context
+        # Add human-readable thresholds/context
         if "meals" in f1_clean:
             sentence = f"Eating multiple meals totaling a lot in one day{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
         elif "stairs" in f1_clean:
@@ -88,7 +83,7 @@ def show_correlation_page(sheets):
         else:
             sentence = f"{f1_clean}{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
 
-        return sentence
+        return sentence, certainty
 
     # --- Top correlations summary ---
     st.markdown("---")
@@ -113,42 +108,37 @@ def show_correlation_page(sheets):
 
     if summary_list:
         summary_df = pd.DataFrame(summary_list)
-        top_corrs = summary_df.reindex(summary_df['r'].abs().sort_values(ascending=False).index)
 
-        # --- Statistically grounded thresholds and sorting by certainty ---
-        likely_real = top_corrs[(top_corrs['r'].abs() >= 0.35) & (top_corrs['p'] <= 0.05)]
-        possible = top_corrs[((top_corrs['r'].abs() >= 0.3) & (top_corrs['r'].abs() < 0.35)) | ((top_corrs['p'] > 0.05) & (top_corrs['p'] <= 0.08))]
-        
-        # Compute certainty for sorting
-        def calc_certainty(p):
-            return int((1 - p/0.05)*100) if p <= 0.05 else 0
-        
-        likely_real['certainty'] = likely_real['p'].apply(calc_certainty)
-        possible['certainty'] = possible['p'].apply(calc_certainty)
-        
-        # Sort by certainty descending, then by absolute correlation descending
-        likely_real = likely_real.sort_values(by=['certainty', 'r'], ascending=[False, False])
-        possible = possible.sort_values(by=['certainty', 'r'], ascending=[False, False])
+        # Compute certainty
+        summary_df['certainty'] = summary_df.apply(lambda row: max(0, int(abs(row['r']) * max(0, 1 - row['p'] / 0.05) * 100)), axis=1)
+
+        # Separate by certainty and p thresholds
+        likely_real = summary_df[(summary_df['certainty'] >= 50)]  # can adjust threshold
+        possible = summary_df[(summary_df['certainty'] < 50) & (summary_df['certainty'] > 0)]
+
+        # Sort by certainty descending
+        likely_real = likely_real.sort_values(by='certainty', ascending=False)
+        possible = possible.sort_values(by='certainty', ascending=False)
 
         st.subheader("Likely real correlations")
         if not likely_real.empty:
-            likely_real['Description'] = likely_real.apply(diary_style_desc, axis=1)
-            for desc in likely_real['Description']:
+            for idx, row in likely_real.iterrows():
+                desc, _ = diary_style_desc(row)
                 st.write(f"- {desc}")
         else:
             st.write("No strong correlations found.")
 
         st.subheader("Possible correlations (borderline)")
         if not possible.empty:
-            possible['Description'] = possible.apply(diary_style_desc, axis=1)
-            for desc in possible['Description']:
+            for idx, row in possible.iterrows():
+                desc, _ = diary_style_desc(row)
                 st.write(f"- {desc}")
         else:
             st.write("No borderline correlations found.")
     else:
         st.write("No correlations found.")
 
-    # 3) Lagged correlation explorer
+    # --- Lagged correlation explorer ---
     st.markdown("---")
     st.subheader("Lagged correlation (single pair)")
     col_x = st.selectbox("X (predictor)", all_cols, index=0)
@@ -169,7 +159,7 @@ def show_correlation_page(sheets):
         best = lagged.loc[lagged['corr'].abs().idxmax()]
         st.write(f"Highest |corr| at lag {int(best['lag'])}: corr={best['corr']:.3f}, p={best['pval']} (n={int(best['n'])})")
 
-    # 4) Time-series overlay viewer
+    # --- Time-series overlay viewer ---
     st.markdown("---")
     st.subheader("Time series overlay")
     ts_x = st.selectbox("Time series X", all_cols, index=0, key="ts_x")
