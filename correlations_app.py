@@ -4,6 +4,37 @@ import pandas as pd
 import numpy as np
 from correlations import compute_daily_aggregates, compute_pairwise_cross_group_matrix
 
+def get_threshold_description(feature_name, daily_data):
+    """
+    Returns a human-readable threshold description for a given feature.
+    Example outputs:
+        - "Spending more than 28 minutes in long standing sessions in one day"
+        - "Consuming ginger three times in one day"
+        - "Climbing a total of 9 stairs or more in a single day"
+    """
+    base_name = feature_name.replace("_7d_avg", "").replace("_sum", "").replace("_count", "").replace("_minutes", "")
+
+    # Use the 75th percentile as a rough "high" threshold for continuous/numeric features
+    if base_name in ["standing_minutes", "stairs_count", "liquids_amount"]:
+        threshold = daily_data[feature_name].quantile(0.75)
+        if base_name == "standing_minutes":
+            return f"Spending more than {int(threshold)} minutes in long standing sessions in one day"
+        elif base_name == "stairs_count":
+            return f"Climbing a total of {int(threshold)} stairs or more in a single day"
+        elif base_name == "liquids_amount":
+            return f"Consuming more than {int(threshold)} ml of liquids in a day"
+
+    # For count-based nutrition items
+    nutrition_items = ["ginger", "cheese", "dairy", "sugar", "protein", "caffeine", "chocolate"]
+    for item in nutrition_items:
+        if item in base_name.lower():
+            threshold = daily_data[feature_name].quantile(0.75)
+            return f"Consuming {item} {int(threshold)} times in one day"
+
+    # Default fallback
+    return human_readable_feature(feature_name)
+
+
 # --- Helper functions for human-readable feature names ---
 def human_readable_feature(name):
     """
@@ -74,22 +105,26 @@ def human_readable_target(name):
     return mapping.get(name, name.replace("_", " ").capitalize())
 
 # --- Main diary description ---
-def diary_style_desc(row):
-    f1_clean = human_readable_feature(row['Feature 1'])
+def diary_style_desc_with_threshold(row, daily):
+    f1_name = row['Feature 1']
     f2_clean = human_readable_target(row['Feature 2'])
+    threshold_desc = get_threshold_description(f1_name, daily)
 
-    # Determine direction
+    # Determine direction and effect
     if row['r'] > 0:
-        verb = "higher" if any(x in f2_clean.lower() for x in ["hr", "sleep", "hrv"]) else "greater"
+        verb = "increase in" if any(x in f2_clean.lower() for x in ["hr", "sleep", "hrv"]) else "greater"
     else:
-        verb = "lower" if any(x in f2_clean.lower() for x in ["hr", "sleep", "hrv"]) else "lesser"
+        verb = "decrease in" if any(x in f2_clean.lower() for x in ["hr", "sleep", "hrv"]) else "lesser"
 
     # Combined certainty metric
     effect_score = abs(row['r']) * 100
     p_boost = max(0, min(50, ((0.05 - row['p']) / 0.05) * 50))
     certainty = int(min(100, effect_score + p_boost))
 
-    return f"{f1_clean} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
+    # Optional: include % change approximation
+    percent_effect = f"{int(effect_score)}% "
+
+    return f"{threshold_desc} is linked to a {percent_effect}{verb} {f2_clean} — Certainty: {certainty}/100"
 
 # --- Main Streamlit app ---
 def show_correlation_page(sheets):
@@ -153,8 +188,8 @@ def show_correlation_page(sheets):
 
         top_corrs['certainty'] = top_corrs.apply(lambda x: compute_certainty(x['p'], x['r']), axis=1)
 
-        likely_real = top_corrs[top_corrs['certainty'] >= 50].sort_values(by='certainty', ascending=False)
-        possible = top_corrs[(top_corrs['certainty'] >= 20) & (top_corrs['certainty'] < 50)].sort_values(by='certainty', ascending=False)
+        likely_real['Description'] = likely_real.apply(lambda x: diary_style_desc_with_threshold(x, daily), axis=1)
+        possible['Description'] = possible.apply(lambda x: diary_style_desc_with_threshold(x, daily), axis=1)
 
         st.subheader("Likely real correlations")
         if not likely_real.empty:
