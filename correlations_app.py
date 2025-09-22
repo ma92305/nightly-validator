@@ -78,13 +78,13 @@ def show_correlation_page(sheets):
         elif "Cheese" in f1_clean:
             sentence = f"Consuming cheese{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
         elif "Dairy" in f1_clean:
-            sentence = f"Consuming dairy{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
+            sentence = f"Consuming dairy{lag_note} is correlated with {verb} {f2_clean} — Certainty: {certainty}/100"
         elif "Gluten" in f1_clean:
             sentence = f"Consuming gluten{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
         elif "Spice" in f1_clean:
             sentence = f"Consuming spicy food{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
         elif "Oil" in f1_clean:
-            sentence = f"Consuming oil{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
+            sentence = f"Consuming oily foods{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
         else:
             sentence = f"{f1_clean}{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
 
