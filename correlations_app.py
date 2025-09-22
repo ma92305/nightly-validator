@@ -28,7 +28,7 @@ def show_correlation_page(sheets):
 
     if len(selected_cols) >= 2:
         method = st.radio("Correlation method", ["pearson", "spearman"])
-        corr_df, p_df = compute_pairwise_correlations(daily, columns=selected_cols, method=method)
+        corr_df, p_df = compute_pairwise_cross_group_matrix(daily, method=method, min_periods=3)
 
         st.subheader("Correlation matrix")
         st.dataframe(corr_df.style.format("{:.2f}"))
