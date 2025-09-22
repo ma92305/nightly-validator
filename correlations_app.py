@@ -4,6 +4,94 @@ import pandas as pd
 import numpy as np
 from correlations import compute_daily_aggregates, compute_pairwise_cross_group_matrix
 
+# --- Helper functions for human-readable feature names ---
+def human_readable_feature(name):
+    """
+    Convert raw variable names into readable English for correlations output.
+    Adds emojis and lag formatting if needed.
+    """
+    # Detect lag
+    lag_note = " roughly 7 days ago" if "_7d_avg" in name else ""
+
+    # Base name without lag suffix
+    base_name = name.replace("_7d_avg", "").replace("_sum", "").replace("_count", "").replace("_minutes", " minutes")
+
+    # Map known nutrition features to emojis
+    emoji_map = {
+        "sugar": "🍬 Sugar",
+        "protein": "🥩 Protein",
+        "caffeine": "☕️ Caffeine"
+    }
+
+    nutrition_map = {
+        "meals": "Eating multiple meals totaling a lot in one day",
+        "chocolate": "Eating chocolate in a day",
+        "ginger": "Consuming ginger",
+        "cheese": "Consuming cheese",
+        "dairy": "Consuming dairy",
+        "gluten": "Consuming gluten",
+        "spice": "Consuming spicy food",
+        "oil": "Consuming oily foods"
+    }
+
+    # Apply emoji mapping first
+    for key, val in emoji_map.items():
+        if key in base_name.lower():
+            return f"{val}{lag_note}"
+
+    # Apply nutrition mapping
+    for key, val in nutrition_map.items():
+        if key in base_name.lower():
+            return f"{val}{lag_note}"
+
+    # Special cases
+    if "liquids" in base_name.lower():
+        return f"Amount of liquids consumed{lag_note}"
+    if "stairs" in base_name.lower():
+        return f"Climbing a high number of stairs in one day{lag_note}"
+    if "standing" in base_name.lower():
+        return f"Spending a long time standing in one day{lag_note}"
+
+    # Weather features: replace underscores with spaces, capitalize words
+    if "weather" in base_name.lower():
+        return base_name.replace("_", " ").capitalize() + lag_note
+
+    # Default: just replace underscores with spaces and capitalize
+    return base_name.replace("_", " ").capitalize() + lag_note
+
+def human_readable_target(name):
+    """
+    Convert target variables (Y) into readable English.
+    """
+    mapping = {
+        "HR_avg": "average heart rate",
+        "HR_max": "maximum heart rate",
+        "HR_min": "minimum heart rate",
+        "HRV": "HRV",
+        "sleep_duration": "sleep duration",
+        "sleep_score": "sleep score"
+    }
+    return mapping.get(name, name.replace("_", " ").capitalize())
+
+# --- Main diary description ---
+def diary_style_desc(row):
+    f1_clean = human_readable_feature(row['Feature 1'])
+    f2_clean = human_readable_target(row['Feature 2'])
+
+    # Determine direction
+    if row['r'] > 0:
+        verb = "higher" if any(x in f2_clean.lower() for x in ["hr", "sleep", "hrv"]) else "greater"
+    else:
+        verb = "lower" if any(x in f2_clean.lower() for x in ["hr", "sleep", "hrv"]) else "lesser"
+
+    # Combined certainty metric
+    effect_score = abs(row['r']) * 100
+    p_boost = max(0, min(50, ((0.05 - row['p']) / 0.05) * 50))
+    certainty = int(min(100, effect_score + p_boost))
+
+    return f"{f1_clean} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
+
+# --- Main Streamlit app ---
 def show_correlation_page(sheets):
     st.title("Correlation Explorer — Health Logs")
     st.markdown(
@@ -32,64 +120,6 @@ def show_correlation_page(sheets):
     method = st.radio("Correlation method", ["pearson", "spearman"], index=0)
     corr_df, p_df = compute_pairwise_cross_group_matrix(daily, method=method, min_periods=3)
 
-    # --- Diary-style description with combined certainty metric ---
-    def diary_style_desc(row):
-        f1 = row['Feature 1']
-        f2 = row['Feature 2']
-
-        # Detect lag
-        lag_note = " roughly 7 days ago" if "_7d_avg" in f1 else ""
-
-        # Clean feature names
-        f1_clean = f1.replace("nutrition_", "").replace("_7d_avg", "").replace("_sum", "") \
-                     .replace("_minutes", " minutes").replace("_count", " count")
-        f2_clean = f2.replace("HR_avg", "average heart rate")\
-                     .replace("HR_max", "maximum heart rate")\
-                     .replace("HRV", "HRV")\
-                     .replace("sleep_duration", "sleep duration")\
-                     .replace("sleep_score", "sleep score")
-
-        # Determine direction
-        if row['r'] > 0:
-            verb = "higher" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "greater"
-        else:
-            verb = "lower" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "lesser"
-
-        # --- Combined certainty metric ---
-        # Base: effect size |r| scaled 0-100
-        effect_score = abs(row['r']) * 100
-        # P-value boost if p <= 0.05, scaled to max +50 points
-        p_boost = max(0, min(50, ((0.05 - row['p']) / 0.05) * 50))
-        certainty = int(min(100, effect_score + p_boost))
-
-        # Human-readable thresholds/context
-        if "meals" in f1_clean:
-            sentence = f"Eating multiple meals totaling a lot in one day{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "stairs" in f1_clean:
-            sentence = f"Climbing a high number of stairs in one day{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "standing" in f1_clean:
-            sentence = f"Spending a long time standing in one day{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "Chocolate" in f1_clean:
-            sentence = f"Eating chocolate in a day{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "Caffeine" in f1_clean:
-            sentence = f"Drinking caffeine{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "Ginger" in f1_clean:
-            sentence = f"Consuming ginger{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "Cheese" in f1_clean:
-            sentence = f"Consuming cheese{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "Dairy" in f1_clean:
-            sentence = f"Consuming dairy{lag_note} is correlated with {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "Gluten" in f1_clean:
-            sentence = f"Consuming gluten{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "Spice" in f1_clean:
-            sentence = f"Consuming spicy food{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "Oil" in f1_clean:
-            sentence = f"Consuming oily foods{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        else:
-            sentence = f"{f1_clean}{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-
-        return sentence
-
     # --- Top correlations summary ---
     st.markdown("---")
     st.subheader("Top correlations summary")
@@ -115,7 +145,7 @@ def show_correlation_page(sheets):
         summary_df = pd.DataFrame(summary_list)
         top_corrs = summary_df.reindex(summary_df['r'].abs().sort_values(ascending=False).index)
 
-        # --- Apply categories ---
+        # Combined certainty metric
         def compute_certainty(p, r):
             effect_score = abs(r) * 100
             p_boost = max(0, min(50, ((0.05 - p) / 0.05) * 50))
