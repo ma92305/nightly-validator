@@ -8,7 +8,7 @@ def show_correlation_page(sheets):
     st.title("Correlation Explorer — Health Logs")
     st.markdown(
         "This page aggregates your sheets into daily features and computes correlations. "
-        "The top correlations are automatically summarized in human-readable language."
+        "The top correlations are automatically summarized in plain English."
     )
 
     # 1) Build daily aggregates
@@ -32,7 +32,7 @@ def show_correlation_page(sheets):
     method = st.radio("Correlation method", ["pearson", "spearman"], index=0)
     corr_df, p_df = compute_pairwise_cross_group_matrix(daily, method=method, min_periods=3)
 
-    # --- Top correlations summary (human-readable, plain-English) ---
+    # --- Top correlations summary (plain English) ---
     st.markdown("---")
     st.subheader("Top correlations summary")
     
@@ -56,22 +56,34 @@ def show_correlation_page(sheets):
     if summary_list:
         summary_df = pd.DataFrame(summary_list)
         top_corrs = summary_df.reindex(summary_df['r'].abs().sort_values(ascending=False).index).head(20)
-    
-        # Plain-English description
+
+        # Plain-English, human-readable description
         def plain_english_desc(row):
-            if row['r'] > 0:
-                effect = "is associated with a higher"
+            # Clean up feature names
+            f1 = row['Feature 1'].replace("nutrition_", "").replace("_7d_avg", "").replace("_sum", "").replace("_minutes", " minutes").replace("_count", " count")
+            f2 = row['Feature 2']
+            f2 = f2.replace("HR_avg", "average heart rate").replace("HR_max", "maximum heart rate").replace("HRV", "HRV").replace("sleep_duration", "sleep duration").replace("sleep_score", "sleep score")
+
+            # Determine natural effect wording
+            if "HR" in f2 or "HRV" in f2:
+                verb = "is associated with a higher" if row['r'] > 0 else "is associated with a lower"
+            elif "sleep" in f2:
+                verb = "is associated with longer" if row['r'] > 0 else "is associated with shorter"
             else:
-                effect = "is associated with a lower"
-    
-            # Optional: add units or rough clarification if known (can extend later)
-            return f"{row['Feature 1']} {effect} {row['Feature 2']} (p={row['p']:.3f})"
-    
+                verb = "is associated with higher" if row['r'] > 0 else "is associated with lower"
+
+            # Optional: rough lag indicator if feature has '_7d_avg' removed
+            lag_note = ""
+            if "_7d_avg" in row['Feature 1']:
+                lag_note = " roughly 7 days later"
+
+            return f"{f1}{lag_note} {verb} {f2} (p={row['p']:.3f})"
+
         top_corrs['Description'] = top_corrs.apply(plain_english_desc, axis=1)
-    
+
         # Show table
         st.table(top_corrs[['Feature 1', 'Feature 2', 'r', 'p', 'Description']])
-    
+
         # Human-readable list
         st.markdown("**Plain-English summary of top correlations:**")
         for desc in top_corrs['Description']:
