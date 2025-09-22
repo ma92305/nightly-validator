@@ -2,8 +2,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-from correlations import compute_daily_aggregates, compute_pairwise_cross_group_matrix, compute_lagged_correlations
+from correlations import compute_daily_aggregates, compute_pairwise_cross_group_matrix
 
 def show_correlation_page(sheets):
     st.title("Correlation Explorer — Health Logs")
@@ -21,9 +20,6 @@ def show_correlation_page(sheets):
         st.write("Available sheets:", list(sheets.keys()))
         return
 
-    st.subheader("Preview daily features")
-    st.dataframe(daily.tail(50))
-
     all_cols = daily.columns.tolist()
     if len(all_cols) < 2:
         st.warning("Not enough features to compute correlations.")
@@ -38,10 +34,8 @@ def show_correlation_page(sheets):
         f1 = row['Feature 1']
         f2 = row['Feature 2']
 
-        # Detect lag
         lag_note = " roughly 7 days ago" if "_7d_avg" in f1 else ""
 
-        # Clean feature names
         f1_clean = f1.replace("nutrition_", "").replace("_7d_avg", "").replace("_sum", "") \
                      .replace("_minutes", " minutes").replace("_count", " count")
         f2_clean = f2.replace("HR_avg", "average heart rate")\
@@ -50,14 +44,13 @@ def show_correlation_page(sheets):
                      .replace("sleep_duration", "sleep duration")\
                      .replace("sleep_score", "sleep score")
 
-        # Determine direction
         if row['r'] > 0:
             verb = "higher" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "greater"
         else:
             verb = "lower" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "lesser"
 
-        # Certainty meter display (already computed in 'certainty' column)
-        certainty = row.get('certainty', 0)
+        # Statistically grounded certainty meter
+        certainty = int((1 - row['p']/0.05) * 100) if row['p'] <= 0.05 else 0
 
         # Human-readable thresholds/context
         if "meals" in f1_clean:
@@ -101,29 +94,22 @@ def show_correlation_page(sheets):
             r = corr_flat.loc[col2, col1]
             p = p_flat.loc[col2, col1]
             if pd.notna(r):
-                summary_list.append({
-                    'Feature 1': col1,
-                    'Feature 2': col2,
-                    'r': r,
-                    'p': p
-                })
+                summary_list.append({'Feature 1': col1, 'Feature 2': col2, 'r': r, 'p': p})
 
     if summary_list:
         summary_df = pd.DataFrame(summary_list)
+        top_corrs = summary_df.reindex(summary_df['r'].abs().sort_values(ascending=False).index)
 
-        # --- Statistically grounded thresholds ---
-        likely_real = summary_df[(summary_df['r'].abs() >= 0.35) & (summary_df['p'] <= 0.08)]
-        possible = summary_df[((summary_df['r'].abs() >= 0.3) & (summary_df['r'].abs() < 0.35)) | ((summary_df['p'] > 0.08) & (summary_df['p'] <= 0.2))]
+        # Statistically grounded thresholds
+        likely_real = top_corrs[(top_corrs['r'].abs() >= 0.35) & (top_corrs['p'] <= 0.05)]
+        possible = top_corrs[((top_corrs['r'].abs() >= 0.3) & (top_corrs['r'].abs() < 0.35)) |
+                             ((top_corrs['p'] > 0.05) & (top_corrs['p'] <= 0.08))]
 
-        # Compute certainty: combines effect size and p-value, permissive but statistically principled
-        def calc_certainty(row):
-            p_clipped = min(row['p'], 0.5)
-            return int(abs(row['r']) * (1 - p_clipped / 0.5) * 100)
+        # Compute certainty
+        likely_real['certainty'] = likely_real['p'].apply(lambda p: int((1 - p/0.05)*100) if p <= 0.05 else 0)
+        possible['certainty'] = possible['p'].apply(lambda p: int((1 - p/0.05)*100) if p <= 0.05 else 0)
 
-        likely_real['certainty'] = likely_real.apply(calc_certainty, axis=1)
-        possible['certainty'] = possible.apply(calc_certainty, axis=1)
-
-        # Sort by certainty descending, then by absolute correlation descending
+        # Sort by certainty descending, then absolute correlation
         likely_real = likely_real.sort_values(by=['certainty', 'r'], ascending=[False, False])
         possible = possible.sort_values(by=['certainty', 'r'], ascending=[False, False])
 
@@ -144,38 +130,3 @@ def show_correlation_page(sheets):
             st.write("No borderline correlations found.")
     else:
         st.write("No correlations found.")
-
-    # 3) Lagged correlation explorer
-    st.markdown("---")
-    st.subheader("Lagged correlation (single pair)")
-    col_x = st.selectbox("X (predictor)", all_cols, index=0)
-    col_y = st.selectbox("Y (response)", all_cols, index=min(1, len(all_cols)-1))
-    max_lag = st.slider("Max lag (in days)", 0, 30, 7)
-    freq = st.radio("Frequency for lagging", ["D", "H"], help="D = days, H = hours. Use H only if both series are hourly-indexed.")
-    method2 = st.radio("Method for lagged correlation", ["pearson", "spearman"], index=0, key="lag_method")
-
-    if st.button("Compute lagged correlations"):
-        s_x = daily[col_x].dropna()
-        s_y = daily[col_y].dropna()
-        merged_index = s_x.index.union(s_y.index)
-        s_x = s_x.reindex(merged_index)
-        s_y = s_y.reindex(merged_index)
-        lagged = compute_lagged_correlations(s_x, s_y, max_lag=max_lag, freq=freq, method=method2)
-        st.line_chart(lagged.set_index('lag')['corr'])
-        st.dataframe(lagged)
-        best = lagged.loc[lagged['corr'].abs().idxmax()]
-        st.write(f"Highest |corr| at lag {int(best['lag'])}: corr={best['corr']:.3f}, p={best['pval']} (n={int(best['n'])})")
-
-    # 4) Time-series overlay viewer
-    st.markdown("---")
-    st.subheader("Time series overlay")
-    ts_x = st.selectbox("Time series X", all_cols, index=0, key="ts_x")
-    ts_y = st.selectbox("Time series Y", all_cols, index=min(1, len(all_cols)-1), key="ts_y")
-    if st.button("Plot time series overlay"):
-        fig, ax = plt.subplots(figsize=(10,4))
-        ax.plot(daily.index, daily[ts_x], label=ts_x)
-        ax.plot(daily.index, daily[ts_y], label=ts_y)
-        ax.legend()
-        ax.set_xlabel("Date")
-        ax.set_ylabel("Value")
-        st.pyplot(fig)
