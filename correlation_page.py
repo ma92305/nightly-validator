@@ -92,7 +92,11 @@ def compute_all_pairwise_correlations(vars_dict, lags_hours=HOUR_LAGS, methods=[
     processed = Parallel(n_jobs=n_jobs, backend='loky')(delayed(process_pair)(a,b,lag) for a,b,lag in all_tasks)
     for sublist in processed:
         results.extend(sublist)
-    return pd.DataFrame(results)
+    if not results:
+        # Return empty dataframe with expected schema
+        return pd.DataFrame(columns=['var_a','var_b','lag_hours','method','r','p','n'])
+    else:
+        return pd.DataFrame(results)
 
 # --- Variable categorization ---
 CORRELATION_SCENARIOS = {
@@ -192,7 +196,10 @@ def correlation_page(dbx):
     st.info("Computing correlations fresh (no cache)...")
     all_corr = compute_all_pairwise_correlations(filtered_vars_dict, lags_hours=lags_choice)
     st.info(f"Computed correlations ({len(all_corr)} rows)")
-    
+
+    st.write("DEBUG: correlation result shape =", all_corr.shape)
+    st.write(all_corr.head())
+
     # Check expected columns exist
     expected_cols = ['var_a','var_b','lag_hours','method','r','p','n']
     missing = [c for c in expected_cols if c not in all_corr.columns]
