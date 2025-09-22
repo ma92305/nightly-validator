@@ -1368,7 +1368,7 @@ dbx = dropbox.Dropbox(
 PAGES = {
     "Validate Logs": validate_logs_page,
     "View Data": view_data_page,
-    "Correlations": lambda: correlation_page(dbx),  # pass your Dropbox client here
+    "Correlations": lambda: correlation_page(load_excel_from_dropbox(dbx)),
 }
 
 st.sidebar.title("Navigation")
