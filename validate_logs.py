@@ -10,7 +10,7 @@ from dropbox.files import WriteMode
 from excel_updater import update_combined_excel
 from symptoms_page import symptoms_page
 from heart_rate_page import hr_page
-from correlation_page import correlation_page  # import the function
+from correlations_app import show_correlation_page
 import importlib
 import excel_updater
 import pandas as pd
@@ -1368,7 +1368,7 @@ dbx = dropbox.Dropbox(
 PAGES = {
     "Validate Logs": validate_logs_page,
     "View Data": view_data_page,
-    "Correlations": lambda: correlation_page(load_excel_from_dropbox(dbx)),
+    "Correlations": lambda: show_correlation_page(load_excel_from_dropbox(dbx)),
 }
 
 st.sidebar.title("Navigation")
