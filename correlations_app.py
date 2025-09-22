@@ -52,9 +52,9 @@ def show_correlation_page(sheets):
 
         # Determine direction
         if row['r'] > 0:
-            verb = "higher" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "more"
+            verb = "higher" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "greater"
         else:
-            verb = "lower" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "less"
+            verb = "lower" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "lesser"
 
         # Certainty meter based on p-value
         if row['p'] <= 0.05:
