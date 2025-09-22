@@ -33,7 +33,7 @@ def show_correlation_page(sheets):
     method = st.radio("Correlation method", ["pearson", "spearman"], index=0)
     corr_df, p_df = compute_pairwise_cross_group_matrix(daily, method=method, min_periods=3)
 
-    # --- Diary-style description function with certainty ---
+    # --- Diary-style description function ---
     def diary_style_desc(row):
         f1 = row['Feature 1']
         f2 = row['Feature 2']
@@ -50,40 +50,38 @@ def show_correlation_page(sheets):
                      .replace("sleep_score", "sleep score")
 
         # Determine direction
-        verb = "higher" if row['r'] > 0 and any(x in f2_clean for x in ["HR", "HRV", "sleep"]) else \
-               "lower" if row['r'] < 0 and any(x in f2_clean for x in ["HR", "HRV", "sleep"]) else \
-               "more" if row['r'] > 0 else "less"
-
-        # Compute certainty
-        certainty = max(0, min(100, int(abs(row['r']) * max(0, 1 - row['p'] / 0.05) * 100)))
+        if row['r'] > 0:
+            verb = "higher" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "more"
+        else:
+            verb = "lower" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "less"
 
         # Add human-readable thresholds/context
         if "meals" in f1_clean:
-            sentence = f"Eating multiple meals totaling a lot in one day{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
+            sentence = f"Eating multiple meals totaling a lot in one day{lag_note} is linked to {verb} {f2_clean}"
         elif "stairs" in f1_clean:
-            sentence = f"Climbing a high number of stairs in one day{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
+            sentence = f"Climbing a high number of stairs in one day{lag_note} is linked to {verb} {f2_clean}"
         elif "standing" in f1_clean:
-            sentence = f"Spending a long time standing in one day{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
+            sentence = f"Spending a long time standing in one day{lag_note} is linked to {verb} {f2_clean}"
         elif "Chocolate" in f1_clean:
-            sentence = f"Eating chocolate in a day{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
+            sentence = f"Eating chocolate in a day{lag_note} is linked to {verb} {f2_clean}"
         elif "Caffeine" in f1_clean:
-            sentence = f"Drinking caffeine{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
+            sentence = f"Drinking caffeine{lag_note} is linked to {verb} {f2_clean}"
         elif "Ginger" in f1_clean:
-            sentence = f"Consuming ginger{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
+            sentence = f"Consuming ginger{lag_note} is linked to {verb} {f2_clean}"
         elif "Cheese" in f1_clean:
-            sentence = f"Consuming cheese{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
+            sentence = f"Consuming cheese{lag_note} is linked to {verb} {f2_clean}"
         elif "Dairy" in f1_clean:
-            sentence = f"Consuming dairy{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
+            sentence = f"Consuming dairy{lag_note} is linked to {verb} {f2_clean}"
         elif "Gluten" in f1_clean:
-            sentence = f"Consuming gluten{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
+            sentence = f"Consuming gluten{lag_note} is linked to {verb} {f2_clean}"
         elif "Spice" in f1_clean:
-            sentence = f"Consuming spicy food{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
+            sentence = f"Consuming spicy food{lag_note} is linked to {verb} {f2_clean}"
         elif "Oil" in f1_clean:
-            sentence = f"Consuming oil{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
+            sentence = f"Consuming oil{lag_note} is linked to {verb} {f2_clean}"
         else:
-            sentence = f"{f1_clean}{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
+            sentence = f"{f1_clean}{lag_note} is linked to {verb} {f2_clean}"
 
-        return sentence, certainty
+        return sentence
 
     # --- Top correlations summary ---
     st.markdown("---")
@@ -109,36 +107,49 @@ def show_correlation_page(sheets):
     if summary_list:
         summary_df = pd.DataFrame(summary_list)
 
-        # Compute certainty
-        summary_df['certainty'] = summary_df.apply(lambda row: max(0, int(abs(row['r']) * max(0, 1 - row['p'] / 0.05) * 100)), axis=1)
-
-        # Separate by certainty and p thresholds
-        likely_real = summary_df[(summary_df['certainty'] >= 50)]  # can adjust threshold
-        possible = summary_df[(summary_df['certainty'] < 50) & (summary_df['certainty'] > 0)]
+        # --- Compute certainty ---
+        summary_df['certainty'] = (summary_df['r'].abs() * (1 - summary_df['p'])).clip(lower=0) * 100
 
         # Sort by certainty descending
-        likely_real = likely_real.sort_values(by='certainty', ascending=False)
-        possible = possible.sort_values(by='certainty', ascending=False)
+        summary_df = summary_df.sort_values('certainty', ascending=False)
 
+        # Flag categories
+        def flag_certainty(cert):
+            if cert >= 60:
+                return "likely real"
+            elif cert >= 40:
+                return "borderline"
+            else:
+                return "low"
+        summary_df['category'] = summary_df['certainty'].apply(flag_certainty)
+
+        # Separate lists
+        likely_real = summary_df[summary_df['category'] == "likely real"]
+        possible = summary_df[summary_df['category'] == "borderline"]
+
+        # Apply diary-style descriptions
+        likely_real['Description'] = likely_real.apply(diary_style_desc, axis=1)
+        possible['Description'] = possible.apply(diary_style_desc, axis=1)
+
+        # Display sorted by certainty
         st.subheader("Likely real correlations")
         if not likely_real.empty:
-            for idx, row in likely_real.iterrows():
-                desc, _ = diary_style_desc(row)
-                st.write(f"- {desc}")
+            for _, row in likely_real.iterrows():
+                st.write(f"- {row['Description']} — Certainty: {int(row['certainty'])}/100")
         else:
             st.write("No strong correlations found.")
 
         st.subheader("Possible correlations (borderline)")
         if not possible.empty:
-            for idx, row in possible.iterrows():
-                desc, _ = diary_style_desc(row)
-                st.write(f"- {desc}")
+            for _, row in possible.iterrows():
+                st.write(f"- {row['Description']} — Certainty: {int(row['certainty'])}/100")
         else:
             st.write("No borderline correlations found.")
+
     else:
         st.write("No correlations found.")
 
-    # --- Lagged correlation explorer ---
+    # 3) Lagged correlation explorer
     st.markdown("---")
     st.subheader("Lagged correlation (single pair)")
     col_x = st.selectbox("X (predictor)", all_cols, index=0)
@@ -159,7 +170,7 @@ def show_correlation_page(sheets):
         best = lagged.loc[lagged['corr'].abs().idxmax()]
         st.write(f"Highest |corr| at lag {int(best['lag'])}: corr={best['corr']:.3f}, p={best['pval']} (n={int(best['n'])})")
 
-    # --- Time-series overlay viewer ---
+    # 4) Time-series overlay viewer
     st.markdown("---")
     st.subheader("Time series overlay")
     ts_x = st.selectbox("Time series X", all_cols, index=0, key="ts_x")
