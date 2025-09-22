@@ -29,71 +29,63 @@ def show_correlation_page(sheets):
     method = st.radio("Correlation method", ["pearson", "spearman"], index=0)
     corr_df, p_df = compute_pairwise_cross_group_matrix(daily, method=method, min_periods=3)
 
-    # --- Diary-style description with combined certainty metric ---
+    # --- Diary-style description with polished formatting ---
     def diary_style_desc(row):
         f1 = row['Feature 1']
         f2 = row['Feature 2']
-
+    
         # Detect lag
         lag_note = " roughly 7 days ago" if "_7d_avg" in f1 else ""
-
-        # Clean feature names
-        f1_clean = f1.replace("nutrition_", "").replace("_7d_avg", "").replace("_sum", "") \
-                     .replace("_minutes", " minutes").replace("_count", " count")
+    
+        # Map raw feature names to human-readable
+        feature_map = {
+            "nutrition_meals": "Eating multiple meals totaling a lot in one day",
+            "nutrition_chocolate": "Eating chocolate in a day",
+            "nutrition_caffeine": "☕️ Drinking caffeine",
+            "nutrition_ginger": "Consuming ginger",
+            "nutrition_cheese": "Consuming cheese",
+            "nutrition_dairy": "Consuming dairy",
+            "nutrition_gluten": "Consuming gluten",
+            "nutrition_spice": "Consuming spicy food",
+            "nutrition_oil": "Consuming oily foods",
+            "nutrition_sugar": "🍬 Consuming sugar",
+            "nutrition_protein": "🥩 Consuming protein",
+            "liquids_amount": "Drinking liquids",
+            "stairs": "Climbing a high number of stairs in one day",
+            "standing": "Spending a long time standing in one day",
+            "weather_temp_avg": "Average daily temperature",
+            "weather_temp_high": "Daily high temperature",
+            "weather_temp_avg_dev_from_7day_avg": "Temperature deviation from 7-day average",
+            "weather_temp_high_dev_from_7day_avg": "High temperature deviation from 7-day average",
+            "weather_pressure_avg_dev_from_7day_avg": "Average pressure deviation from 7-day average",
+            "weather_pressure_max_dev_from_7day_avg": "Maximum pressure deviation from 7-day average",
+            "weather_pressure_min_dev_from_7day_avg": "Minimum pressure deviation from 7-day average",
+            "weather_precipitation_total": "Total precipitation",
+        }
+    
+        f1_clean = feature_map.get(f1, f1.replace("_", " "))
+        
+        # Map f2 to readable names
         f2_clean = f2.replace("HR_avg", "average heart rate")\
-                     .replace("HR_max", "maximum heart rate")\
-                     .replace("HRV", "HRV")\
-                     .replace("sleep_duration", "sleep duration")\
-                     .replace("sleep_score", "sleep score")\
-                     .replace("HR_min", "minimum heart rate")
-
+                      .replace("HR_max", "maximum heart rate")\
+                      .replace("HR_min", "minimum heart rate")\
+                      .replace("HRV", "HRV")\
+                      .replace("sleep_duration", "sleep duration")\
+                      .replace("sleep_score", "sleep score")
+    
         # Determine direction
         if row['r'] > 0:
             verb = "higher" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "greater"
         else:
             verb = "lower" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "lesser"
-
-        # --- Combined certainty metric ---
+    
+        # Combined certainty metric
         effect_score = abs(row['r']) * 100
         p_boost = max(0, min(50, ((0.05 - row['p']) / 0.05) * 50))
         certainty = int(min(100, effect_score + p_boost))
-
-        # --- Human-readable descriptions ---
-        if "meals" in f1_clean:
-            sentence = f"Eating multiple meals totaling a lot in one day{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "stairs" in f1_clean:
-            sentence = f"Climbing many stairs in one day{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "standing" in f1_clean:
-            sentence = f"Spending a long time standing in one day{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "Chocolate" in f1_clean:
-            sentence = f"Eating chocolate in a day{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "Caffeine" in f1_clean:
-            sentence = f"☕️ Drinking caffeine{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "Ginger" in f1_clean:
-            sentence = f"Consuming ginger{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "Cheese" in f1_clean:
-            sentence = f"Consuming cheese{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "Dairy" in f1_clean:
-            sentence = f"Consuming dairy{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "Gluten" in f1_clean:
-            sentence = f"Consuming gluten{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "Spice" in f1_clean:
-            sentence = f"Consuming spicy food{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "Oil" in f1_clean:
-            sentence = f"Consuming oily foods{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "Sugar" in f1_clean:
-            sentence = f"🍬 Consuming sugar{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "Protein" in f1_clean:
-            sentence = f"🥩 Consuming protein{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "liquids" in f1_clean:
-            sentence = f"Amount of liquids consumed{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        elif "weather" in f1_clean:
-            # Friendly weather descriptions
-            f1_clean = f1_clean.replace("temp", "temperature").replace("pressure", "pressure").replace("precipitation", "precipitation")
-            sentence = f"{f1_clean.replace('_', ' ')}{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-        else:
-            sentence = f"{f1_clean}{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
-
+    
+        sentence = f"{f1_clean}{lag_note} is linked to {verb} {f2_clean} — Certainty: {certainty}/100"
+        
         return sentence
 
     # --- Top correlations summary ---
