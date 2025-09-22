@@ -32,7 +32,57 @@ def show_correlation_page(sheets):
     method = st.radio("Correlation method", ["pearson", "spearman"], index=0)
     corr_df, p_df = compute_pairwise_cross_group_matrix(daily, method=method, min_periods=3)
 
-    # --- Top correlations summary (plain English, diary-style) ---
+    # --- Diary-style description function ---
+    def diary_style_desc(row):
+        f1 = row['Feature 1']
+        f2 = row['Feature 2']
+
+        # Detect lag
+        lag_note = " roughly 7 days ago" if "_7d_avg" in f1 else ""
+
+        # Clean feature names
+        f1_clean = f1.replace("nutrition_", "").replace("_7d_avg", "").replace("_sum", "").replace("_minutes", " minutes").replace("_count", " count")
+        f2_clean = f2.replace("HR_avg", "average heart rate")\
+                     .replace("HR_max", "maximum heart rate")\
+                     .replace("HRV", "HRV")\
+                     .replace("sleep_duration", "sleep duration")\
+                     .replace("sleep_score", "sleep score")
+
+        # Determine direction
+        if row['r'] > 0:
+            verb = "higher" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "more"
+        else:
+            verb = "lower" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "less"
+
+        # Add human-readable thresholds/context
+        if "meals" in f1_clean:
+            sentence = f"Eating multiple meals totaling a lot in one day{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+        elif "stairs" in f1_clean:
+            sentence = f"Climbing a high number of stairs in one day{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+        elif "standing" in f1_clean:
+            sentence = f"Spending a long time standing in one day{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+        elif "Chocolate" in f1_clean:
+            sentence = f"Eating chocolate in a day{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+        elif "Caffeine" in f1_clean:
+            sentence = f"Drinking caffeine{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+        elif "Ginger" in f1_clean:
+            sentence = f"Consuming ginger{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+        elif "Cheese" in f1_clean:
+            sentence = f"Consuming cheese{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+        elif "Dairy" in f1_clean:
+            sentence = f"Consuming dairy{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+        elif "Gluten" in f1_clean:
+            sentence = f"Consuming gluten{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+        elif "Spice" in f1_clean:
+            sentence = f"Consuming spicy food{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+        elif "Oil" in f1_clean:
+            sentence = f"Consuming oil{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+        else:
+            sentence = f"{f1_clean}{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
+
+        return sentence
+
+    # --- Top correlations summary (plain-English) ---
     st.markdown("---")
     st.subheader("Top correlations summary")
 
@@ -56,57 +106,6 @@ def show_correlation_page(sheets):
     if summary_list:
         summary_df = pd.DataFrame(summary_list)
         top_corrs = summary_df.reindex(summary_df['r'].abs().sort_values(ascending=False).index).head(20)
-
-# Diary-style description with thresholds and context
-def diary_style_desc(row):
-    f1 = row['Feature 1']
-    f2 = row['Feature 2']
-
-    # Detect lag
-    lag_note = " roughly 7 days ago" if "_7d_avg" in f1 else ""
-
-    # Clean feature names
-    f1_clean = f1.replace("nutrition_", "").replace("_7d_avg", "").replace("_sum", "").replace("_minutes", " minutes").replace("_count", " count")
-    f2_clean = f2.replace("HR_avg", "average heart rate")\
-                 .replace("HR_max", "maximum heart rate")\
-                 .replace("HRV", "HRV")\
-                 .replace("sleep_duration", "sleep duration")\
-                 .replace("sleep_score", "sleep score")
-
-    # Determine direction
-    if row['r'] > 0:
-        verb = "higher" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "more"
-    else:
-        verb = "lower" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "less"
-
-    # Add human-readable thresholds/context
-    if "meals" in f1_clean:
-        sentence = f"Eating multiple meals totaling a lot in one day{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-    elif "stairs" in f1_clean:
-        sentence = f"Climbing a high number of stairs in one day{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-    elif "standing" in f1_clean:
-        sentence = f"Spending a long time standing in one day{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-    elif "Chocolate" in f1_clean:
-        sentence = f"Eating chocolate in a day{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-    elif "Caffeine" in f1_clean:
-        sentence = f"Drinking caffeine{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-    elif "Ginger" in f1_clean:
-        sentence = f"Consuming ginger{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-    elif "Cheese" in f1_clean:
-        sentence = f"Consuming cheese{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-    elif "Dairy" in f1_clean:
-        sentence = f"Consuming dairy{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-    elif "Gluten" in f1_clean:
-        sentence = f"Consuming gluten{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-    elif "Spice" in f1_clean:
-        sentence = f"Consuming spicy food{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-    elif "Oil" in f1_clean:
-        sentence = f"Consuming oil{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-    else:
-        sentence = f"{f1_clean}{lag_note} is linked to {verb} {f2_clean} (p={row['p']:.3f})"
-
-    return sentence
-
         top_corrs['Description'] = top_corrs.apply(diary_style_desc, axis=1)
 
         # Show table
