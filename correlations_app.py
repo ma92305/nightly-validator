@@ -192,13 +192,9 @@ def show_correlation_page(sheets):
         likely_real = top_corrs[top_corrs['certainty'] >= 50].sort_values(by='certainty', ascending=False)
         possible = top_corrs[(top_corrs['certainty'] >= 20) & (top_corrs['certainty'] < 50)].sort_values(by='certainty', ascending=False)
     
-        # Apply the new threshold-aware description function
-        likely_real['Description'] = likely_real.apply(lambda x: diary_style_desc_with_threshold(x, daily), axis=1)
-        possible['Description'] = possible.apply(lambda x: diary_style_desc_with_threshold(x, daily), axis=1)
-
         st.subheader("Likely real correlations")
         if not likely_real.empty:
-            likely_real['Description'] = likely_real.apply(diary_style_desc, axis=1)
+            likely_real['Description'] = likely_real.apply(lambda x: diary_style_desc_with_threshold(x, daily), axis=1)
             for desc in likely_real['Description']:
                 st.write(f"- {desc}")
         else:
@@ -206,7 +202,7 @@ def show_correlation_page(sheets):
 
         st.subheader("Possible correlations (borderline)")
         if not possible.empty:
-            possible['Description'] = possible.apply(diary_style_desc, axis=1)
+            possible['Description'] = possible.apply(lambda x: diary_style_desc_with_threshold(x, daily), axis=1)
             for desc in possible['Description']:
                 st.write(f"- {desc}")
         else:
