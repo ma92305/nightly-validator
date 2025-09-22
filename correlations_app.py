@@ -202,22 +202,28 @@ def show_correlation_page(sheets):
                 with st.expander(description):
                     f1 = row['Feature 1']
                     f2 = row['Feature 2']
-                    
-                    # Scatterplot / line plot
-                    fig, ax = plt.subplots(figsize=(6,4))
-                    ax.scatter(daily[f1], daily[f2], alpha=0.6)
-                    
-                    # Optional: linear fit
-                    if len(daily[f1].dropna()) > 1:
-                        m, b = np.polyfit(daily[f1].dropna(), daily[f2].dropna(), 1)
-                        ax.plot(daily[f1], m*daily[f1] + b, color='red', linestyle='--')
-                    
-                    ax.set_xlabel(human_readable_feature(f1))
-                    ax.set_ylabel(human_readable_target(f2))
-                    ax.set_title(f"r = {row['r']:.2f}, p = {row['p']:.3f}")
-                    st.pyplot(fig)
-        else:
-            st.write("No strong correlations found.")
+                
+                    # Keep only rows where both f1 and f2 are not NaN
+                    df_plot = daily[[f1, f2]].dropna()
+                
+                    if len(df_plot) > 1:
+                        x = df_plot[f1]
+                        y = df_plot[f2]
+                
+                        # Scatterplot
+                        fig, ax = plt.subplots(figsize=(6,4))
+                        ax.scatter(x, y, alpha=0.6)
+                
+                        # Optional: linear fit
+                        m, b = np.polyfit(x, y, 1)
+                        ax.plot(x, m*x + b, color='red', linestyle='--')
+                
+                        ax.set_xlabel(human_readable_feature(f1))
+                        ax.set_ylabel(human_readable_target(f2))
+                        ax.set_title(f"r = {row['r']:.2f}, p = {row['p']:.3f}")
+                        st.pyplot(fig)
+                    else:
+                        st.write("Not enough data to plot.")
 
         st.subheader("Possible correlations (borderline)")
         if not possible.empty:
