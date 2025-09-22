@@ -32,14 +32,14 @@ def show_correlation_page(sheets):
     method = st.radio("Correlation method", ["pearson", "spearman"], index=0)
     corr_df, p_df = compute_pairwise_cross_group_matrix(daily, method=method, min_periods=3)
 
-    # --- Top correlations summary (human-readable) ---
+    # --- Top correlations summary (human-readable, plain-English) ---
     st.markdown("---")
     st.subheader("Top correlations summary")
-
+    
     # Flatten correlation matrix (upper triangle only)
     corr_flat = corr_df.where(np.triu(np.ones(corr_df.shape), k=1).astype(bool))
     p_flat = p_df.where(np.triu(np.ones(p_df.shape), k=1).astype(bool))
-
+    
     summary_list = []
     for col1 in corr_flat.columns:
         for col2 in corr_flat.index:
@@ -52,34 +52,28 @@ def show_correlation_page(sheets):
                     'r': r,
                     'p': p
                 })
-
+    
     if summary_list:
         summary_df = pd.DataFrame(summary_list)
         top_corrs = summary_df.reindex(summary_df['r'].abs().sort_values(ascending=False).index).head(20)
-
-        # Human-readable description
-        def describe_corr(row):
-            abs_r = abs(row['r'])
-            if abs_r >= 0.8:
-                strength = "very strong"
-            elif abs_r >= 0.6:
-                strength = "strong"
-            elif abs_r >= 0.4:
-                strength = "moderate"
-            elif abs_r >= 0.2:
-                strength = "weak"
+    
+        # Plain-English description
+        def plain_english_desc(row):
+            if row['r'] > 0:
+                effect = "is associated with a higher"
             else:
-                strength = "very weak"
-            direction = "positively" if row['r'] > 0 else "negatively"
-            return f"{row['Feature 1']} is {direction} correlated with {row['Feature 2']} ({strength}, r={row['r']:.2f}, p={row['p']:.3f})"
-
-        top_corrs['Description'] = top_corrs.apply(describe_corr, axis=1)
-
-        # Display table
+                effect = "is associated with a lower"
+    
+            # Optional: add units or rough clarification if known (can extend later)
+            return f"{row['Feature 1']} {effect} {row['Feature 2']} (p={row['p']:.3f})"
+    
+        top_corrs['Description'] = top_corrs.apply(plain_english_desc, axis=1)
+    
+        # Show table
         st.table(top_corrs[['Feature 1', 'Feature 2', 'r', 'p', 'Description']])
-
-        # Human-readable summary
-        st.markdown("**Human-readable top correlations:**")
+    
+        # Human-readable list
+        st.markdown("**Plain-English summary of top correlations:**")
         for desc in top_corrs['Description']:
             st.write(f"- {desc}")
     else:
