@@ -128,15 +128,28 @@ def compute_daily_aggregates(sheets):
         s['bedtime_diff'] = s['bedtime_hours'] - s['bedtime_avg7']
         s['waketime_diff'] = s['waketime_hours'] - s['waketime_avg7']
     
+        # Convert duration to numeric hours if needed
+        if 'duration' in s.columns:
+            if np.issubdtype(s['duration'].dtype, np.timedelta64):
+                s['duration_hours'] = s['duration'].dt.total_seconds() / 3600
+            else:
+                s['duration_hours'] = s['duration']
+        else:
+            s['duration_hours'] = np.nan
+    
         # Compute sleep stage percentages
         stage_cols = ['rem_time', 'core_time', 'deep_time', 'awake_time']
         for col in stage_cols:
             if col in s.columns:
-                s[f'{col}_pct'] = s[col] / s['duration']
+                # Convert timedelta to hours if needed
+                if np.issubdtype(s[col].dtype, np.timedelta64):
+                    s[col] = s[col].dt.total_seconds() / 3600
+                # Percentage relative to total duration
+                s[f'{col}_pct'] = s[col] / s['duration_hours']
     
         # Store features in the main dictionary
-        features['sleep_duration'] = s['duration']
-        features['sleep_score'] = s['score']
+        features['sleep_duration'] = s['duration_hours']
+        features['sleep_score'] = s['score'] if 'score' in s.columns else np.nan
         for col in stage_cols:
             if col in s.columns:
                 features[col] = s[col]
