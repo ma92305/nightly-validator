@@ -83,7 +83,7 @@ def show_correlation_page(sheets):
 
         return sentence
 
-    # --- Top correlations summary (plain-English) ---
+    # --- Top correlations summary ---
     st.markdown("---")
     st.subheader("Top correlations summary")
 
@@ -108,7 +108,7 @@ def show_correlation_page(sheets):
         summary_df = pd.DataFrame(summary_list)
         top_corrs = summary_df.reindex(summary_df['r'].abs().sort_values(ascending=False).index)
 
-        # --- Separate summaries ---
+        # --- Statistically grounded thresholds ---
         likely_real = top_corrs[(top_corrs['r'].abs() >= 0.35) & (top_corrs['p'] <= 0.05)]
         possible = top_corrs[((top_corrs['r'].abs() >= 0.3) & (top_corrs['r'].abs() < 0.35)) | ((top_corrs['p'] > 0.05) & (top_corrs['p'] <= 0.08))]
 
