@@ -2,14 +2,14 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-
 from correlations import compute_daily_aggregates, compute_pairwise_cross_group_matrix, compute_lagged_correlations
 
 def show_correlation_page(sheets):
     st.title("Correlation Explorer — Health Logs")
-    st.markdown("This page aggregates your sheets into daily features and computes correlations. Use controls below to explore.")
+    st.markdown(
+        "This page aggregates your sheets into daily features and computes correlations. "
+        "The top correlations are automatically summarized in human-readable language."
+    )
 
     # 1) Build daily aggregates
     with st.spinner("Aggregating daily features..."):
@@ -23,87 +23,67 @@ def show_correlation_page(sheets):
     st.subheader("Preview daily features")
     st.dataframe(daily.tail(50))
 
-    # 2) Column selection
     all_cols = daily.columns.tolist()
-    selected_cols = st.multiselect(
-        "Select features to include in correlation matrix",
-        all_cols,
-        default=all_cols[:8]
-    )
+    if len(all_cols) < 2:
+        st.warning("Not enough features to compute correlations.")
+        return
 
-    if len(selected_cols) >= 2:
-        method = st.radio("Correlation method", ["pearson", "spearman"])
-        corr_df, p_df = compute_pairwise_cross_group_matrix(daily[selected_cols], method=method, min_periods=3)
+    # 2) Compute correlations across all columns
+    method = st.radio("Correlation method", ["pearson", "spearman"], index=0)
+    corr_df, p_df = compute_pairwise_cross_group_matrix(daily, method=method, min_periods=3)
 
-        # --- Correlation matrix display ---
-        st.subheader("Correlation matrix")
-        st.dataframe(corr_df.style.format("{:.2f}"))
-        st.caption("P-values shown separately below.")
+    # --- Top correlations summary (human-readable) ---
+    st.markdown("---")
+    st.subheader("Top correlations summary")
 
-        fig, ax = plt.subplots(figsize=(max(6, len(selected_cols)), max(4, len(selected_cols)/2)))
-        sns.heatmap(corr_df.astype(float), annot=True, vmin=-1, vmax=1, cmap="vlag", ax=ax, fmt=".2f")
-        st.pyplot(fig)
+    # Flatten correlation matrix (upper triangle only)
+    corr_flat = corr_df.where(np.triu(np.ones(corr_df.shape), k=1).astype(bool))
+    p_flat = p_df.where(np.triu(np.ones(p_df.shape), k=1).astype(bool))
 
-        st.subheader("P-values")
-        st.dataframe(p_df.style.format("{:.3f}"))
+    summary_list = []
+    for col1 in corr_flat.columns:
+        for col2 in corr_flat.index:
+            r = corr_flat.loc[col2, col1]
+            p = p_flat.loc[col2, col1]
+            if pd.notna(r):
+                summary_list.append({
+                    'Feature 1': col1,
+                    'Feature 2': col2,
+                    'r': r,
+                    'p': p
+                })
 
-        # Download correlation matrix
-        if st.button("Download correlation matrix CSV"):
-            csv = corr_df.to_csv().encode('utf-8')
-            st.download_button("Download", csv, file_name="correlation_matrix.csv", mime="text/csv")
+    if summary_list:
+        summary_df = pd.DataFrame(summary_list)
+        top_corrs = summary_df.reindex(summary_df['r'].abs().sort_values(ascending=False).index).head(20)
 
-        # --- Top 20 correlations summary ---
-        st.markdown("---")
-        st.subheader("Top correlations summary (human-readable)")
+        # Human-readable description
+        def describe_corr(row):
+            abs_r = abs(row['r'])
+            if abs_r >= 0.8:
+                strength = "very strong"
+            elif abs_r >= 0.6:
+                strength = "strong"
+            elif abs_r >= 0.4:
+                strength = "moderate"
+            elif abs_r >= 0.2:
+                strength = "weak"
+            else:
+                strength = "very weak"
+            direction = "positively" if row['r'] > 0 else "negatively"
+            return f"{row['Feature 1']} is {direction} correlated with {row['Feature 2']} ({strength}, r={row['r']:.2f}, p={row['p']:.3f})"
 
-        # Flatten correlation matrix and keep only upper triangle
-        corr_flat = corr_df.where(np.triu(np.ones(corr_df.shape), k=1).astype(bool))
-        summary_list = []
+        top_corrs['Description'] = top_corrs.apply(describe_corr, axis=1)
 
-        for col1 in corr_flat.columns:
-            for col2 in corr_flat.index:
-                r = corr_flat.loc[col2, col1]
-                p = p_df.loc[col2, col1]
-                if pd.notna(r):
-                    summary_list.append({
-                        'Feature 1': col1,
-                        'Feature 2': col2,
-                        'r': r,
-                        'p': p
-                    })
+        # Display table
+        st.table(top_corrs[['Feature 1', 'Feature 2', 'r', 'p', 'Description']])
 
-        if summary_list:
-            summary_df = pd.DataFrame(summary_list)
-            # Top 20 by absolute correlation
-            top_corrs = summary_df.reindex(summary_df['r'].abs().sort_values(ascending=False).index).head(20)
-
-            # Human-readable description
-            def describe_corr(row):
-                abs_r = abs(row['r'])
-                if abs_r >= 0.8:
-                    strength = "very strong"
-                elif abs_r >= 0.6:
-                    strength = "strong"
-                elif abs_r >= 0.4:
-                    strength = "moderate"
-                elif abs_r >= 0.2:
-                    strength = "weak"
-                else:
-                    strength = "very weak"
-                direction = "positively" if row['r'] > 0 else "negatively"
-                return f"{row['Feature 1']} is {direction} correlated with {row['Feature 2']} ({strength}, r={row['r']:.2f}, p={row['p']:.3f})"
-
-            top_corrs['Description'] = top_corrs.apply(describe_corr, axis=1)
-
-            # Table
-            st.table(top_corrs[['Feature 1', 'Feature 2', 'r', 'p', 'Description']])
-
-            # Human-readable list
-            st.markdown("**Top correlations summary:**")
-            for desc in top_corrs['Description']:
-                st.write(f"- {desc}")
-        else:
-            st.write("No correlations found.")
+        # Human-readable summary
+        st.markdown("**Human-readable top correlations:**")
+        for desc in top_corrs['Description']:
+            st.write(f"- {desc}")
+    else:
+        st.write("No correlations found.")
 
     # 3) Lagged correlation explorer
     st.markdown("---")
@@ -123,7 +103,6 @@ def show_correlation_page(sheets):
         lagged = compute_lagged_correlations(s_x, s_y, max_lag=max_lag, freq=freq, method=method2)
         st.line_chart(lagged.set_index('lag')['corr'])
         st.dataframe(lagged)
-
         best = lagged.loc[lagged['corr'].abs().idxmax()]
         st.write(f"Highest |corr| at lag {int(best['lag'])}: corr={best['corr']:.3f}, p={best['pval']} (n={int(best['n'])})")
 
