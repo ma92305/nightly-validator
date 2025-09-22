@@ -20,6 +20,9 @@ def show_correlation_page(sheets):
         st.write("Available sheets:", list(sheets.keys()))
         return
 
+    st.subheader("Preview daily features")
+    st.dataframe(daily.tail(50))
+
     all_cols = daily.columns.tolist()
     if len(all_cols) < 2:
         st.warning("Not enough features to compute correlations.")
@@ -29,13 +32,15 @@ def show_correlation_page(sheets):
     method = st.radio("Correlation method", ["pearson", "spearman"], index=0)
     corr_df, p_df = compute_pairwise_cross_group_matrix(daily, method=method, min_periods=3)
 
-    # --- Diary-style description with certainty meter ---
+    # --- Diary-style description with combined certainty metric ---
     def diary_style_desc(row):
         f1 = row['Feature 1']
         f2 = row['Feature 2']
 
+        # Detect lag
         lag_note = " roughly 7 days ago" if "_7d_avg" in f1 else ""
 
+        # Clean feature names
         f1_clean = f1.replace("nutrition_", "").replace("_7d_avg", "").replace("_sum", "") \
                      .replace("_minutes", " minutes").replace("_count", " count")
         f2_clean = f2.replace("HR_avg", "average heart rate")\
@@ -44,13 +49,18 @@ def show_correlation_page(sheets):
                      .replace("sleep_duration", "sleep duration")\
                      .replace("sleep_score", "sleep score")
 
+        # Determine direction
         if row['r'] > 0:
             verb = "higher" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "greater"
         else:
             verb = "lower" if "HR" in f2_clean or "HRV" in f2_clean or "sleep" in f2_clean else "lesser"
 
-        # Statistically grounded certainty meter
-        certainty = int((1 - row['p']/0.05) * 100) if row['p'] <= 0.05 else 0
+        # --- Combined certainty metric ---
+        # Base: effect size |r| scaled 0-100
+        effect_score = abs(row['r']) * 100
+        # P-value boost if p <= 0.05, scaled to max +50 points
+        p_boost = max(0, min(50, ((0.05 - row['p']) / 0.05) * 50))
+        certainty = int(min(100, effect_score + p_boost))
 
         # Human-readable thresholds/context
         if "meals" in f1_clean:
@@ -94,24 +104,27 @@ def show_correlation_page(sheets):
             r = corr_flat.loc[col2, col1]
             p = p_flat.loc[col2, col1]
             if pd.notna(r):
-                summary_list.append({'Feature 1': col1, 'Feature 2': col2, 'r': r, 'p': p})
+                summary_list.append({
+                    'Feature 1': col1,
+                    'Feature 2': col2,
+                    'r': r,
+                    'p': p
+                })
 
     if summary_list:
         summary_df = pd.DataFrame(summary_list)
         top_corrs = summary_df.reindex(summary_df['r'].abs().sort_values(ascending=False).index)
 
-        # Statistically grounded thresholds
-        likely_real = top_corrs[(top_corrs['r'].abs() >= 0.35) & (top_corrs['p'] <= 0.05)]
-        possible = top_corrs[((top_corrs['r'].abs() >= 0.3) & (top_corrs['r'].abs() < 0.35)) |
-                             ((top_corrs['p'] > 0.05) & (top_corrs['p'] <= 0.08))]
+        # --- Apply categories ---
+        def compute_certainty(p, r):
+            effect_score = abs(r) * 100
+            p_boost = max(0, min(50, ((0.05 - p) / 0.05) * 50))
+            return int(min(100, effect_score + p_boost))
 
-        # Compute certainty
-        likely_real['certainty'] = likely_real['p'].apply(lambda p: int((1 - p/0.05)*100) if p <= 0.05 else 0)
-        possible['certainty'] = possible['p'].apply(lambda p: int((1 - p/0.05)*100) if p <= 0.05 else 0)
+        top_corrs['certainty'] = top_corrs.apply(lambda x: compute_certainty(x['p'], x['r']), axis=1)
 
-        # Sort by certainty descending, then absolute correlation
-        likely_real = likely_real.sort_values(by=['certainty', 'r'], ascending=[False, False])
-        possible = possible.sort_values(by=['certainty', 'r'], ascending=[False, False])
+        likely_real = top_corrs[top_corrs['certainty'] >= 50].sort_values(by='certainty', ascending=False)
+        possible = top_corrs[(top_corrs['certainty'] >= 20) & (top_corrs['certainty'] < 50)].sort_values(by='certainty', ascending=False)
 
         st.subheader("Likely real correlations")
         if not likely_real.empty:
