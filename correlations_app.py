@@ -2,6 +2,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from correlations import compute_daily_aggregates, compute_pairwise_cross_group_matrix, compute_lagged_correlations
 
 def show_correlation_page(sheets):
@@ -105,16 +106,27 @@ def show_correlation_page(sheets):
 
     if summary_list:
         summary_df = pd.DataFrame(summary_list)
-        top_corrs = summary_df.reindex(summary_df['r'].abs().sort_values(ascending=False).index).head(20)
-        top_corrs['Description'] = top_corrs.apply(diary_style_desc, axis=1)
+        top_corrs = summary_df.reindex(summary_df['r'].abs().sort_values(ascending=False).index)
 
-        # Show table
-        st.table(top_corrs[['Feature 1', 'Feature 2', 'r', 'p', 'Description']])
+        # --- Separate summaries ---
+        likely_real = top_corrs[(top_corrs['r'].abs() >= 0.35) & (top_corrs['p'] <= 0.05)]
+        possible = top_corrs[((top_corrs['r'].abs() >= 0.3) & (top_corrs['r'].abs() < 0.35)) | ((top_corrs['p'] > 0.05) & (top_corrs['p'] <= 0.08))]
 
-        # Diary-style list
-        st.markdown("**Plain-English summary of top correlations:**")
-        for desc in top_corrs['Description']:
-            st.write(f"- {desc}")
+        st.subheader("Likely real correlations")
+        if not likely_real.empty:
+            likely_real['Description'] = likely_real.apply(diary_style_desc, axis=1)
+            for desc in likely_real['Description']:
+                st.write(f"- {desc}")
+        else:
+            st.write("No strong correlations found.")
+
+        st.subheader("Possible correlations (borderline)")
+        if not possible.empty:
+            possible['Description'] = possible.apply(diary_style_desc, axis=1)
+            for desc in possible['Description']:
+                st.write(f"- {desc}")
+        else:
+            st.write("No borderline correlations found.")
     else:
         st.write("No correlations found.")
 
