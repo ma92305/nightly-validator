@@ -144,8 +144,11 @@ def compute_daily_aggregates(sheets):
                 # Convert timedelta to hours if needed
                 if np.issubdtype(s[col].dtype, np.timedelta64):
                     s[col] = s[col].dt.total_seconds() / 3600
+                elif np.issubdtype(s[col].dtype, np.datetime64):
+                    # Convert datetime to hours since midnight (fallback)
+                    s[col] = s[col].dt.hour + s[col].dt.minute / 60 + s[col].dt.second / 3600
                 # Percentage relative to total duration
-                s[f'{col}_pct'] = s[col] / s['duration_hours']
+                s[f'{col}_pct'] = s[col] / s['duration_hours'].replace({0: np.nan})
     
         # Store features in the main dictionary
         features['sleep_duration'] = s['duration_hours']
