@@ -25,6 +25,37 @@ def get_valid_dates(validated_keys_df, category_col):
         return set(df['date'].dropna())
     return set()
 
+VARIABLE_A_GROUPS = [
+    "Conditions", "Stairs", "Walking", "Standing", "Meds", 
+    "Nutrition", "Liquids", "Meals", "HR", "Weather", "Sleep"
+]
+
+VARIABLE_B_GROUPS = [
+    "Symptoms", "HR", "Digestion", "Sleep"
+]
+
+def categorize_columns_for_cross_group(df_columns):
+    """
+    Categorize columns into Variable A vs Variable B based on name.
+    Returns: (list_a, list_b)
+    """
+    var_a_cols = []
+    var_b_cols = []
+
+    for col in df_columns:
+        col_lower = col.lower()
+        # Variable A
+        if any(prefix.lower() in col_lower for prefix in VARIABLE_A_GROUPS):
+            var_a_cols.append(col)
+        # Variable B
+        if any(prefix.lower() in col_lower for prefix in VARIABLE_B_GROUPS):
+            var_b_cols.append(col)
+
+    # Optionally remove overlap: avoid same column in both
+    var_a_cols = [c for c in var_a_cols if c not in var_b_cols]
+
+    return var_a_cols, var_b_cols
+
 def compute_daily_aggregates(sheets):
     """
     Convert the dictionary of raw sheets to a single daily-aggregated DataFrame.
@@ -630,40 +661,46 @@ def compute_daily_aggregates(sheets):
     daily_df = daily_df.sort_index()
     return daily_df
 
-def compute_pairwise_correlations(df, columns=None, method='pearson', min_periods=3):
+def compute_pairwise_cross_group_matrix(df, method='pearson', min_periods=3):
     """
-    Compute correlation matrix (Pearson or Spearman) and p-values matrix.
-    Returns (corr_df, pval_df).
+    Compute correlation matrix (Pearson or Spearman) and p-values matrix,
+    but only for Variable A vs Variable B. Intra-group correlations are set to NaN.
+    Returns: (corr_df, pval_df)
     """
-    if columns is None:
-        columns = df.columns.tolist()
-    data = df[columns].copy()
-    corr = data.corr(method='pearson' if method == 'pearson' else None)
-    # compute pairwise with stats (if possible)
+    columns = df.columns.tolist()
+    corr = pd.DataFrame(index=columns, columns=columns, data=np.nan)
     pvals = pd.DataFrame(index=columns, columns=columns, data=np.nan)
-    for i in range(len(columns)):
-        for j in range(i, len(columns)):
-            a = data[columns[i]]
-            b = data[columns[j]]
-            valid = a.notna() & b.notna()
+
+    # Categorize columns
+    var_a_cols, var_b_cols = categorize_columns_for_cross_group(columns)
+
+    for a_col in var_a_cols:
+        for b_col in var_b_cols:
+            # skip if same column
+            if a_col == b_col:
+                continue
+
+            series_a = df[a_col]
+            series_b = df[b_col]
+            valid = series_a.notna() & series_b.notna()
+
             if valid.sum() >= min_periods:
                 try:
                     if method == 'pearson':
-                        r, p = pearsonr(a[valid], b[valid])
+                        r, p = pearsonr(series_a[valid], series_b[valid])
                     else:
-                        r, p = spearmanr(a[valid], b[valid])
-                    corr.loc[columns[i], columns[j]] = r
-                    corr.loc[columns[j], columns[i]] = r
-                    pvals.loc[columns[i], columns[j]] = p
-                    pvals.loc[columns[j], columns[i]] = p
+                        r, p = spearmanr(series_a[valid], series_b[valid])
                 except Exception:
-                    corr.loc[columns[i], columns[j]] = np.nan
-                    pvals.loc[columns[i], columns[j]] = np.nan
+                    r, p = np.nan, np.nan
             else:
-                corr.loc[columns[i], columns[j]] = np.nan
-                corr.loc[columns[j], columns[i]] = np.nan
-                pvals.loc[columns[i], columns[j]] = np.nan
-                pvals.loc[columns[j], columns[i]] = np.nan
+                r, p = np.nan, np.nan
+
+            # Fill symmetric positions in matrices
+            corr.loc[a_col, b_col] = r
+            corr.loc[b_col, a_col] = r
+            pvals.loc[a_col, b_col] = p
+            pvals.loc[b_col, a_col] = p
+
     return corr.astype(float), pvals.astype(float)
 
 def compute_lagged_correlations(series_x, series_y, max_lag=7, freq='D', method='pearson', min_periods=3):
