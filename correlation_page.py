@@ -188,24 +188,10 @@ def correlation_page(dbx):
     min_abs_r = st.slider("Minimum absolute correlation to show:", 0.0, 1.0, 0.25, 0.01)
     p_threshold = st.number_input("Max p-value to show (NaN = ignore):", value=0.05, format="%.3f")
 
-    # ---- Correlation computation (cache per scenario, lag and variable set) ----
-    cache_key = f"{scenario}_{user_start}_{user_end}_{','.join(map(str,lags_choice))}.parquet"
-    cache_path = os.path.join("corr_cache", cache_key)
-    os.makedirs("corr_cache", exist_ok=True)
-    
-    # Load from cache if exists
-    if os.path.exists(cache_path):
-        try:
-            all_corr = pd.read_parquet(cache_path)
-            st.info(f"Loaded correlations from cache ({len(all_corr)} rows)")
-        except Exception:
-            st.warning("Failed to read cached correlations. Recomputing...")
-            all_corr = compute_all_pairwise_correlations(filtered_vars_dict, lags_hours=lags_choice)
-            all_corr.to_parquet(cache_path)
-    else:
-        all_corr = compute_all_pairwise_correlations(filtered_vars_dict, lags_hours=lags_choice)
-        all_corr.to_parquet(cache_path)
-        st.info(f"Computed correlations ({len(all_corr)} rows)")
+    # ---- Correlation computation (always fresh, no cache) ----
+    st.info("Computing correlations fresh (no cache)...")
+    all_corr = compute_all_pairwise_correlations(filtered_vars_dict, lags_hours=lags_choice)
+    st.info(f"Computed correlations ({len(all_corr)} rows)")
     
     # Check expected columns exist
     expected_cols = ['var_a','var_b','lag_hours','method','r','p','n']
