@@ -11,7 +11,12 @@ def get_threshold_description(feature_name, daily_data):
     Returns a human-readable threshold description for a given feature.
     Handles continuous (standing, stairs, liquids) and binary/rare nutrition items differently.
     """
-    base_name = feature_name.replace("_7d_avg", "").replace("_sum", "").replace("_count", "").replace("_minutes", "")
+    base_name = (
+        feature_name.replace("_7d_avg", "")
+        .replace("_sum", "")
+        .replace("_count", "")
+        .replace("_minutes", "")
+    )
 
     # Thresholds for continuous/numeric features (standing, stairs, liquids)
     if base_name in ["standing_minutes", "stairs_count", "liquids_amount"]:
@@ -24,16 +29,19 @@ def get_threshold_description(feature_name, daily_data):
             return f"Consuming more than {int(threshold)} ml of liquids in a day"
 
     # For count-based nutrition items and meals
-    nutrition_items = ["ginger", "cheese", "dairy", "sugar", "protein", "caffeine", "chocolate", "meals"]
+    nutrition_items = [
+        "ginger", "cheese", "dairy", "sugar", "protein",
+        "caffeine", "chocolate", "meals"
+    ]
     for item in nutrition_items:
         if item in base_name.lower():
             threshold = daily_data[feature_name].quantile(0.75)
 
-            if threshold <= 0:  
-                # Handle binary or rare consumption
+            # ✅ Special-case: 0 means binary or rare → "at least once"
+            if threshold <= 0.5:
                 return f"Days on which you consumed {item} at least once"
             else:
-                return f"Days on which you consumed {item} {int(threshold)} or more times"
+                return f"Days on which you consumed {item} {int(round(threshold))} or more times"
 
     # Default fallback
     return human_readable_feature(feature_name)
