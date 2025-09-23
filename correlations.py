@@ -56,6 +56,8 @@ def categorize_columns_for_cross_group(columns):
             independent.append(col)
         elif lc.startswith("condition_"):
             independent.append(col)
+        elif lc.startswith("symptom_"):
+            independent.append(col)
         elif lc.startswith("digestion_"):
             independent.append(col)  # digestion in both
 
