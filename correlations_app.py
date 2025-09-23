@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 def get_threshold_description(feature_name, daily_data):
     """
     Returns a human-readable threshold description for a given feature.
-    For nutrition counts, meals, and liquids, phrases are simplified for clarity.
+    Handles continuous (standing, stairs, liquids) and binary/rare nutrition items differently.
     """
     base_name = feature_name.replace("_7d_avg", "").replace("_sum", "").replace("_count", "").replace("_minutes", "")
 
@@ -27,7 +27,12 @@ def get_threshold_description(feature_name, daily_data):
     for item in nutrition_items:
         if item in base_name.lower():
             threshold = daily_data[feature_name].quantile(0.75)
-            return f"Consuming {item} {int(threshold)} times in one day"
+
+            if threshold <= 0:  
+                # Handle binary or rare consumption
+                return f"Days on which you consumed {item} at least once"
+            else:
+                return f"Days on which you consumed {item} {int(threshold)} or more times"
 
     # Default fallback
     return human_readable_feature(feature_name)
