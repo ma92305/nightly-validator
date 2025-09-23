@@ -35,39 +35,41 @@ VARIABLE_B_GROUPS = [
 ]
 
 def categorize_columns_for_cross_group(columns):
-    var_a_cols = []
-    var_b_cols = []
+    """
+    Split columns into independent (predictors) and dependent (outcomes).
+    Some categories (like digestion) can belong to both.
+    """
+    independent = []
+    dependent = []
 
     for col in columns:
         lc = col.lower()
 
-        # --- Symptoms (both sets, but we'll filter self:self later) ---
-        if col.endswith("_severity_avg") or col == "Total_Symptom_Score":
-            var_a_cols.append(col)
-            var_b_cols.append(col)
+        # Independent categories
+        if lc.startswith("med_"):
+            independent.append(col)
+        elif lc.startswith(("nutrition_", "meal_", "liquid_")):
+            independent.append(col)
+        elif lc.startswith(("weather_", "hourlyweather_")):
+            independent.append(col)
+        elif lc.startswith(("standing_", "walking_", "stairs_", "location_", "steps_")):
+            independent.append(col)
+        elif lc.startswith("condition_"):
+            independent.append(col)
+        elif lc.startswith("digestion_"):
+            independent.append(col)  # digestion in both
 
-        # --- Medications (independent only) ---
-        elif "med" in lc or "dose" in lc:
-            var_a_cols.append(col)
+        # Dependent categories
+        if lc.startswith("symptom_"):  # each symptom separately
+            dependent.append(col)
+        elif lc.startswith("sleep_"):
+            dependent.append(col)
+        elif lc.startswith(("heartrate_", "hrv_")):
+            dependent.append(col)
+        elif lc.startswith("digestion_"):
+            dependent.append(col)  # digestion in both
 
-        # --- Physiological outcomes (dependent only) ---
-        elif "heart" in lc or "hrv" in lc or "sleep" in lc:
-            var_b_cols.append(col)
-
-        # --- Exposures / behaviors (independent only) ---
-        elif any(x in lc for x in [
-            "caffeine", "steps", "walk", "stand", "stairs",
-            "protein", "fat", "carb", "sugar", "meal", "nutrition",
-            "weather", "temperature", "humidity"
-        ]):
-            var_a_cols.append(col)
-
-        # --- Default: include in both sets ---
-        else:
-            var_a_cols.append(col)
-            var_b_cols.append(col)
-
-    return var_a_cols, var_b_cols
+    return independent, dependent
 
 def compute_daily_aggregates(sheets):
     """
