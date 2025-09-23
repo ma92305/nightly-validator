@@ -207,27 +207,27 @@ def show_correlation_page(sheets):
         if not likely_real.empty:
             for i, row in likely_real.iterrows():
                 description = diary_style_desc_with_threshold(row, daily)
-    
+
                 # Use an expander so user can click to see details
                 with st.expander(description):
                     f1 = row['Feature 1']
                     f2 = row['Feature 2']
-                
+
                     # Keep only rows where both f1 and f2 are not NaN
                     df_plot = daily[[f1, f2]].dropna()
-                
+
                     if len(df_plot) > 1:
                         x = df_plot[f1]
                         y = df_plot[f2]
-                
+
                         # Scatterplot
                         fig, ax = plt.subplots(figsize=(6,4))
                         ax.scatter(x, y, alpha=0.6)
-                
+
                         # Optional: linear fit
                         m, b = np.polyfit(x, y, 1)
                         ax.plot(x, m*x + b, color='red', linestyle='--')
-                
+
                         ax.set_xlabel(human_readable_feature(f1))
                         ax.set_ylabel(human_readable_target(f2))
                         ax.set_title(f"r = {row['r']:.2f}, p = {row['p']:.3f}")
@@ -237,10 +237,32 @@ def show_correlation_page(sheets):
 
         st.subheader("Possible correlations (borderline)")
         if not possible.empty:
-            possible['Description'] = possible.apply(lambda x: diary_style_desc_with_threshold(x, daily), axis=1)
-            for desc in possible['Description']:
-                st.write(f"- {desc}")
+            for i, row in possible.iterrows():
+                description = diary_style_desc_with_threshold(row, daily)
+
+                with st.expander(description):
+                    f1 = row['Feature 1']
+                    f2 = row['Feature 2']
+
+                    df_plot = daily[[f1, f2]].dropna()
+
+                    if len(df_plot) > 1:
+                        x = df_plot[f1]
+                        y = df_plot[f2]
+
+                        # Scatterplot
+                        fig, ax = plt.subplots(figsize=(6,4))
+                        ax.scatter(x, y, alpha=0.6)
+
+                        # Optional: linear fit
+                        m, b = np.polyfit(x, y, 1)
+                        ax.plot(x, m*x + b, color='red', linestyle='--')
+
+                        ax.set_xlabel(human_readable_feature(f1))
+                        ax.set_ylabel(human_readable_target(f2))
+                        ax.set_title(f"r = {row['r']:.2f}, p = {row['p']:.3f}")
+                        st.pyplot(fig)
+                    else:
+                        st.write("Not enough data to plot.")
         else:
             st.write("No borderline correlations found.")
-    else:
-        st.write("No correlations found.")
