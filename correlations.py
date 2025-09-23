@@ -34,25 +34,32 @@ VARIABLE_B_GROUPS = [
     "Symptoms", "HR", "Digestion", "Sleep"
 ]
 
-def categorize_columns_for_cross_group(df_columns):
-    """
-    Categorize columns into Variable A vs Variable B based on name.
-    Returns: (list_a, list_b)
-    """
+def categorize_columns_for_cross_group(columns):
     var_a_cols = []
     var_b_cols = []
 
-    for col in df_columns:
-        col_lower = col.lower()
-        # Variable A
-        if any(prefix.lower() in col_lower for prefix in VARIABLE_A_GROUPS):
+    for col in columns:
+        lc = col.lower()
+
+        # --- Symptoms (in both sets) ---
+        if col.endswith("_severity_avg") or col == "Total_Symptom_Score":
             var_a_cols.append(col)
-        # Variable B
-        if any(prefix.lower() in col_lower for prefix in VARIABLE_B_GROUPS):
             var_b_cols.append(col)
 
-    # Optionally remove overlap: avoid same column in both
-    var_a_cols = [c for c in var_a_cols if c not in var_b_cols]
+        # --- Physiological outcomes ---
+        elif "heart" in lc or "hrv" in lc or "sleep" in lc:
+            var_b_cols.append(col)
+
+        # --- Exposures / behaviors ---
+        elif any(x in lc for x in ["caffeine", "steps", "walk", "stand", "stairs",
+                                   "protein", "fat", "carb", "sugar", "meal", "nutrition",
+                                   "weather", "temperature", "humidity"]):
+            var_a_cols.append(col)
+
+        # --- Default: put in both just in case ---
+        else:
+            var_a_cols.append(col)
+            var_b_cols.append(col)
 
     return var_a_cols, var_b_cols
 
