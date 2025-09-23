@@ -41,22 +41,28 @@ def categorize_columns_for_cross_group(columns):
     for col in columns:
         lc = col.lower()
 
-        # --- Symptoms (in both sets) ---
+        # --- Symptoms (both sets, but we'll filter self:self later) ---
         if col.endswith("_severity_avg") or col == "Total_Symptom_Score":
             var_a_cols.append(col)
             var_b_cols.append(col)
 
-        # --- Physiological outcomes ---
+        # --- Medications (independent only) ---
+        elif "med" in lc or "dose" in lc:
+            var_a_cols.append(col)
+
+        # --- Physiological outcomes (dependent only) ---
         elif "heart" in lc or "hrv" in lc or "sleep" in lc:
             var_b_cols.append(col)
 
-        # --- Exposures / behaviors ---
-        elif any(x in lc for x in ["caffeine", "steps", "walk", "stand", "stairs",
-                                   "protein", "fat", "carb", "sugar", "meal", "nutrition",
-                                   "weather", "temperature", "humidity"]):
+        # --- Exposures / behaviors (independent only) ---
+        elif any(x in lc for x in [
+            "caffeine", "steps", "walk", "stand", "stairs",
+            "protein", "fat", "carb", "sugar", "meal", "nutrition",
+            "weather", "temperature", "humidity"
+        ]):
             var_a_cols.append(col)
 
-        # --- Default: put in both just in case ---
+        # --- Default: include in both sets ---
         else:
             var_a_cols.append(col)
             var_b_cols.append(col)
