@@ -187,19 +187,21 @@ def show_correlation_page(sheets):
                     'p': p
                 })
 
-    # --- Top correlations summary ---
     if summary_list:
         summary_df = pd.DataFrame(summary_list)
         top_corrs = summary_df.reindex(summary_df['r'].abs().sort_values(ascending=False).index)
-    
+
         def compute_certainty(p, r):
             effect_score = abs(r) * 100
             p_boost = max(0, min(50, ((0.05 - p) / 0.05) * 50))
             return int(min(100, effect_score + p_boost))
-    
+
         top_corrs['certainty'] = top_corrs.apply(lambda x: compute_certainty(x['p'], x['r']), axis=1)
-    
-        # Define likely_real and possible **before using them**
+
+        # 🚨 Only keep statistically significant correlations
+        top_corrs = top_corrs[top_corrs['p'] < 0.05]
+
+        # Define likely_real and possible after filtering
         likely_real = top_corrs[top_corrs['certainty'] >= 50].sort_values(by='certainty', ascending=False)
         possible = top_corrs[(top_corrs['certainty'] >= 20) & (top_corrs['certainty'] < 50)].sort_values(by='certainty', ascending=False)
 
@@ -208,26 +210,18 @@ def show_correlation_page(sheets):
             for i, row in likely_real.iterrows():
                 description = diary_style_desc_with_threshold(row, daily)
 
-                # Use an expander so user can click to see details
                 with st.expander(description):
                     f1 = row['Feature 1']
                     f2 = row['Feature 2']
-
-                    # Keep only rows where both f1 and f2 are not NaN
                     df_plot = daily[[f1, f2]].dropna()
 
                     if len(df_plot) > 1:
                         x = df_plot[f1]
                         y = df_plot[f2]
-
-                        # Scatterplot
                         fig, ax = plt.subplots(figsize=(6,4))
                         ax.scatter(x, y, alpha=0.6)
-
-                        # Optional: linear fit
                         m, b = np.polyfit(x, y, 1)
                         ax.plot(x, m*x + b, color='red', linestyle='--')
-
                         ax.set_xlabel(human_readable_feature(f1))
                         ax.set_ylabel(human_readable_target(f2))
                         ax.set_title(f"r = {row['r']:.2f}, p = {row['p']:.3f}")
@@ -243,21 +237,15 @@ def show_correlation_page(sheets):
                 with st.expander(description):
                     f1 = row['Feature 1']
                     f2 = row['Feature 2']
-
                     df_plot = daily[[f1, f2]].dropna()
 
                     if len(df_plot) > 1:
                         x = df_plot[f1]
                         y = df_plot[f2]
-
-                        # Scatterplot
                         fig, ax = plt.subplots(figsize=(6,4))
                         ax.scatter(x, y, alpha=0.6)
-
-                        # Optional: linear fit
                         m, b = np.polyfit(x, y, 1)
                         ax.plot(x, m*x + b, color='red', linestyle='--')
-
                         ax.set_xlabel(human_readable_feature(f1))
                         ax.set_ylabel(human_readable_target(f2))
                         ax.set_title(f"r = {row['r']:.2f}, p = {row['p']:.3f}")
@@ -266,3 +254,5 @@ def show_correlation_page(sheets):
                         st.write("Not enough data to plot.")
         else:
             st.write("No borderline correlations found.")
+    else:
+        st.write("No correlations found.")
