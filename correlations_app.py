@@ -8,25 +8,22 @@ import matplotlib.pyplot as plt
 def get_threshold_description(feature_name, daily_data):
     """
     Returns a human-readable threshold description for a given feature.
-    Example outputs:
-        - "Spending more than 28 minutes in long standing sessions in one day"
-        - "Consuming ginger three times in one day"
-        - "Climbing a total of 9 stairs or more in a single day"
+    For nutrition counts, meals, and liquids, phrases are simplified for clarity.
     """
     base_name = feature_name.replace("_7d_avg", "").replace("_sum", "").replace("_count", "").replace("_minutes", "")
 
-    # Use the 75th percentile as a rough "high" threshold for continuous/numeric features
+    # Thresholds for continuous/numeric features (standing, stairs, liquids)
     if base_name in ["standing_minutes", "stairs_count", "liquids_amount"]:
         threshold = daily_data[feature_name].quantile(0.75)
         if base_name == "standing_minutes":
-            return f"Spending more than {int(threshold)} minutes in long standing sessions in one day"
+            return f"Spending more than {int(threshold)} minutes standing in one day"
         elif base_name == "stairs_count":
-            return f"Climbing a total of {int(threshold)} stairs or more in a single day"
+            return f"Climbing more than {int(threshold)} stairs in one day"
         elif base_name == "liquids_amount":
             return f"Consuming more than {int(threshold)} ml of liquids in a day"
 
-    # For count-based nutrition items
-    nutrition_items = ["ginger", "cheese", "dairy", "sugar", "protein", "caffeine", "chocolate"]
+    # For count-based nutrition items and meals
+    nutrition_items = ["ginger", "cheese", "dairy", "sugar", "protein", "caffeine", "chocolate", "meals"]
     for item in nutrition_items:
         if item in base_name.lower():
             threshold = daily_data[feature_name].quantile(0.75)
@@ -34,7 +31,6 @@ def get_threshold_description(feature_name, daily_data):
 
     # Default fallback
     return human_readable_feature(feature_name)
-
 
 # --- Helper functions for human-readable feature names ---
 def human_readable_feature(name):
