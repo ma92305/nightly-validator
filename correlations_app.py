@@ -171,27 +171,15 @@ SEVERITY_MAP = {"⚪️":0, "🟡":1, "🟠":2, "🔴":3, "🟣":4, "none":0, No
 
 def preprocess_symptom_matrix(symptom_df):
     """
-    Convert symptom sheet to numeric wide-format matrix (rows=time, columns=symptoms).
-    Supports:
-        - Wide-format: columns = MIGRAINE_SYMPTOMS
-        - Long-format: columns = ['item', 'time', 'severity']
+    Convert emoji severity values into numeric matrix.
+    Works for both long-format and wide-format sheets.
     """
-    # Detect long-format
-    if {'item', 'time', 'severity'}.issubset(symptom_df.columns):
-        wide_df = symptom_df.pivot_table(
-            index='time',
-            columns='item',
-            values='severity',
-            aggfunc='last'
-        ).reset_index()
-        # Ensure all symptoms exist
-        for symptom in MIGRAINE_SYMPTOMS:
-            if symptom not in wide_df.columns:
-                wide_df[symptom] = 0
-        symptom_df = wide_df.set_index('time')
-
-    # Replace emoji/severity values with numeric, fill missing
-    num_df = symptom_df[MIGRAINE_SYMPTOMS].replace(SEVERITY_MAP).fillna(0)
+    # Replace emojis with numbers
+    num_df = symptom_df[MIGRAINE_SYMPTOMS].replace(SEVERITY_MAP)
+    
+    # Force numeric type (coerce invalid entries to 0)
+    num_df = num_df.apply(pd.to_numeric, errors='coerce').fillna(0)
+    
     return num_df
 
 def compute_baseline(num_df):
