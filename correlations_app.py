@@ -554,10 +554,11 @@ def show_correlation_page(sheets):
     # --- Detect refined episodes ---
     episodes = detect_migraine_episodes_refined(
         migraine_score,
+        num_df,             # <-- add this
         threshold=3,
         min_duration=1
     )
-    
+        
     # --- Display episodes ---
     display_migraine_episodes_refined(
         st,
