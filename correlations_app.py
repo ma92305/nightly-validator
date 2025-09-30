@@ -173,15 +173,13 @@ def preprocess_symptom_matrix(symptom_df):
     """
     Convert symptom DataFrame to numeric matrix.
     Handles both wide-format and long-format sheets.
+    Ensures datetime index for proper timestamp operations.
     """
     # Check if sheet is wide format
     missing_cols = [s for s in MIGRAINE_SYMPTOMS if s not in symptom_df.columns]
     if not missing_cols:
         # Already wide format
         num_df = symptom_df[MIGRAINE_SYMPTOMS].replace(SEVERITY_MAP)
-        # Convert index to datetime if possible
-        if not pd.api.types.is_datetime64_any_dtype(num_df.index):
-            num_df.index = pd.to_datetime(num_df.index, errors='coerce')
     else:
         # Likely long format: columns "time", "item", "severity"
         if not {"time", "item", "severity"}.issubset(symptom_df.columns):
@@ -195,8 +193,6 @@ def preprocess_symptom_matrix(symptom_df):
             values="severity",
             aggfunc="first"  # take first if duplicates
         )
-        # Convert index to datetime
-        symptom_wide.index = pd.to_datetime(symptom_wide.index, errors='coerce')
         # Add missing symptom columns
         for s in MIGRAINE_SYMPTOMS:
             if s not in symptom_wide.columns:
@@ -206,6 +202,14 @@ def preprocess_symptom_matrix(symptom_df):
 
     # Force numeric type
     num_df = num_df.apply(pd.to_numeric, errors='coerce').fillna(0)
+
+    # Ensure datetime index if possible
+    if not pd.api.types.is_datetime64_any_dtype(num_df.index):
+        try:
+            num_df.index = pd.to_datetime(num_df.index)
+        except Exception:
+            pass  # leave as-is if cannot convert
+
     return num_df
 
 def compute_baseline(num_df):
@@ -270,15 +274,18 @@ def detect_migraine_episodes(migraine_score, threshold=3, min_duration=1):
             })
     return episodes
 
-def display_migraine_episodes(st, num_df, migraine_score, episodes):
+def display_migraine_episodes(st, symptom_df, migraine_score, episodes):
     """
     Streamlit display for detected migraine episodes.
-    num_df: numeric symptom matrix with datetime index
+    Uses nearest timestamp if exact peak_time is not in the symptom_df index.
     """
     st.subheader("Migraine Episode Analysis")
     if not episodes:
         st.write("No migraine episodes detected.")
         return
+
+    # Preprocess numeric symptom DataFrame
+    num_df = preprocess_symptom_matrix(symptom_df)
 
     for i, ep in enumerate(episodes, 1):
         st.markdown(f"**Episode {i}**")
@@ -287,17 +294,17 @@ def display_migraine_episodes(st, num_df, migraine_score, episodes):
         # Find peak time
         peak_time = migraine_score[ep['start']:ep['end']].idxmax()
 
-        # Safely slice numeric dataframe
+        # Get nearest available timestamp if exact match doesn't exist
         if peak_time in num_df.index:
-            snapshot = num_df.loc[peak_time, MIGRAINE_SYMPTOMS]
+            snapshot = num_df.loc[peak_time]
         else:
-            # fallback: nearest timestamp
-            snapshot = num_df.iloc[(num_df.index - peak_time).abs().argmin()]
+            nearest_idx = ((num_df.index - peak_time).total_seconds().abs()).argmin()
+            snapshot = num_df.iloc[nearest_idx]
             st.write("(Used nearest timestamp for snapshot)")
 
         st.write("Snapshot of symptoms at peak:")
         st.dataframe(snapshot.to_frame("Severity"))
-
+        
 # --- Main Streamlit app ---
 def show_correlation_page(sheets):
     st.title("Correlation Explorer — Health Logs")
