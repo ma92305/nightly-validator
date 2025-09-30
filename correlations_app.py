@@ -158,20 +158,34 @@ SEVERITY_MAP = {"⚪️":0,"🟡":1,"🟠":2,"🔴":3,"🟣":4,"none":0,None:0}
 MIGRAINE_SYMPTOMS = sorted(list({s for c in MIGRAINE_CLUSTERS for s in c}))
 ALL_SYMPTOMS = sorted(list({s for c in MIGRAINE_CLUSTERS for s in c} | set(POTS_SYMPTOMS) | set(FUZZINESS_COMPONENTS)))
 
-def preprocess_symptom_matrix(symptom_df):
+def preprocess_symptom_matrix_ffill(symptom_df):
+    """
+    Converts long- or wide-format symptom logs into a numeric DataFrame with fill-forward logic.
+    Each symptom’s last reported severity persists until updated.
+    """
+    # Ensure all necessary columns exist
     if all(s in symptom_df.columns for s in MIGRAINE_SYMPTOMS):
         num_df = symptom_df[ALL_SYMPTOMS].copy()
     else:
         if not {"time","item","severity"}.issubset(symptom_df.columns):
             raise ValueError("Sheet must contain wide-format or long-format ['time','item','severity']")
+        # pivot long -> wide
         symptom_wide = symptom_df.pivot_table(index="time",columns="item",values="severity",aggfunc="first")
         for s in ALL_SYMPTOMS:
             if s not in symptom_wide.columns:
                 symptom_wide[s] = 0
         num_df = symptom_wide[ALL_SYMPTOMS].copy()
-    num_df = num_df.replace(SEVERITY_MAP).apply(pd.to_numeric,errors='coerce').fillna(0)
-    if not pd.api.types.is_datetime64_any_dtype(num_df.index):
-        num_df.index = pd.to_datetime(num_df.index,errors='coerce')
+    
+    # Convert severity emojis to numeric
+    num_df = num_df.replace(SEVERITY_MAP).apply(pd.to_numeric, errors='coerce').fillna(0)
+    
+    # Ensure chronological order
+    num_df.index = pd.to_datetime(num_df.index, errors='coerce')
+    num_df = num_df.sort_index()
+    
+    # --- Forward-fill each symptom until next update ---
+    num_df = num_df.ffill()
+    
     return num_df
 
 def compute_baseline(num_df):
