@@ -306,3 +306,20 @@ def show_correlation_page(sheets):
             st.write("No borderline correlations found.")
     else:
         st.write("No correlations found.")
+
+    # --- Migraine episode analysis ---
+    st.markdown("---")
+    st.header("Migraine Episode Analysis")
+
+    migraine_days = detect_migraine_days(daily)
+    st.write(f"Detected {len(migraine_days)} migraine days.")
+
+    if migraine_days:
+        prodrome_signs = identify_prodrome_signs(daily)
+        if not prodrome_signs.empty:
+            st.subheader("Likely Prodrome Warning Signs (1 day before)")
+            st.dataframe(prodrome_signs, use_container_width=True)
+        else:
+            st.info("No strong prodrome patterns detected.")
+    else:
+        st.info("No migraine days found in dataset.")
