@@ -179,6 +179,9 @@ def preprocess_symptom_matrix(symptom_df):
     if not missing_cols:
         # Already wide format
         num_df = symptom_df[MIGRAINE_SYMPTOMS].replace(SEVERITY_MAP)
+        # Convert index to datetime if possible
+        if not pd.api.types.is_datetime64_any_dtype(num_df.index):
+            num_df.index = pd.to_datetime(num_df.index, errors='coerce')
     else:
         # Likely long format: columns "time", "item", "severity"
         if not {"time", "item", "severity"}.issubset(symptom_df.columns):
@@ -192,6 +195,8 @@ def preprocess_symptom_matrix(symptom_df):
             values="severity",
             aggfunc="first"  # take first if duplicates
         )
+        # Convert index to datetime
+        symptom_wide.index = pd.to_datetime(symptom_wide.index, errors='coerce')
         # Add missing symptom columns
         for s in MIGRAINE_SYMPTOMS:
             if s not in symptom_wide.columns:
