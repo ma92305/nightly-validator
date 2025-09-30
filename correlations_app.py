@@ -283,19 +283,16 @@ def score_migraine_refined(num_df, median, mad, weights=None, daily_features=Non
     migraine_score = migraine_score.where(has_core, 0)
 
     return migraine_score
-    
-def detect_migraine_episodes_refined(
+    def detect_migraine_episodes_refined(
     migraine_score, 
     num_df, 
     threshold=3.0, 
     min_duration=1,
     core_symptoms=["Headache","Left side headache","Right side headache","Nausea","Vision issues"],
-    min_core_active=2
+    min_core_active=2,
+    min_weighted_sum=3.5,      # stricter
+    min_peak_score=4            # only recommendable episodes
 ):
-    """
-    Detect migraine episodes with stricter filtering.
-    Only episodes likely needing rescue meds are kept.
-    """
     episodes = []
     in_episode = False
     start_idx = None
@@ -311,15 +308,14 @@ def detect_migraine_episodes_refined(
                 duration = (migraine_score.loc[start_idx:end_idx].shape[0])
                 if duration >= min_duration:
                     snapshot = num_df.loc[start_idx:end_idx]
-                    # Require core symptom activity
-                    core_active = (snapshot[core_symptoms] > 0).sum(axis=1).max()
-                    # Require weighted severity above 1.5 per timestamp on average
+                    core_active = (snapshot[core_symptoms] >= 2).sum(axis=1).max()
                     weighted_sum = (snapshot * pd.Series(SYMPTOM_WEIGHTS)).sum(axis=1).mean()
-                    if core_active >= min_core_active and weighted_sum >= 1.5:
+                    peak = migraine_score.loc[start_idx:end_idx].max()
+                    if core_active >= min_core_active and weighted_sum >= min_weighted_sum and peak >= min_peak_score:
                         episodes.append({
                             "start": start_idx,
                             "end": end_idx,
-                            "peak_score": migraine_score.loc[start_idx:end_idx].max()
+                            "peak_score": peak
                         })
                 in_episode = False
 
@@ -328,13 +324,14 @@ def detect_migraine_episodes_refined(
         end_idx = migraine_score.index[-1]
         duration = (migraine_score.loc[start_idx:end_idx].shape[0])
         snapshot = num_df.loc[start_idx:end_idx]
-        core_active = (snapshot[core_symptoms] > 0).sum(axis=1).max()
+        core_active = (snapshot[core_symptoms] >= 2).sum(axis=1).max()
         weighted_sum = (snapshot * pd.Series(SYMPTOM_WEIGHTS)).sum(axis=1).mean()
-        if duration >= min_duration and core_active >= min_core_active and weighted_sum >= 1.5:
+        peak = migraine_score.loc[start_idx:end_idx].max()
+        if duration >= min_duration and core_active >= min_core_active and weighted_sum >= min_weighted_sum and peak >= min_peak_score:
             episodes.append({
                 "start": start_idx,
                 "end": end_idx,
-                "peak_score": migraine_score.loc[start_idx:end_idx].max()
+                "peak_score": peak
             })
 
     return episodes
