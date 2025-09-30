@@ -158,6 +158,30 @@ POTS_SYMPTOMS = [
 # Map fuzziness to relevant POTS indicators
 FUZZINESS_COMPONENTS = ["Brain fog", "Nausea", "Weakness/shakiness"]  # mimic POTS-like fuzziness
 
+# --- Symptom weights for migraine scoring ---
+SYMPTOM_WEIGHTS = {
+    "Headache": 2,
+    "Right side headache": 2,
+    "Left side headache": 2,
+    "Nausea": 1.5,
+    "Sensory sensitivity": 1.5,
+    "Vision issues": 1.5,
+    "Eye pain": 1.5,
+    "Base of head pain": 1.5,
+    "Neck pain": 1.2,
+    "Fatigue": 0.5,
+    "Dizziness": 0.5,
+    "Fuzziness": 0.5,
+    "Weakness/shakiness": 0.5,
+    "Brain fog": 0.5,
+    "Heavy eyes": 0.5,
+    "Negative mood": 0.3,
+    "Overheating": 0.3,
+    "Bloating": 0.2,
+    "Low appetite/early satiety": 0.2,
+    "Stomach cramping": 0.2
+}
+
 SEVERITY_MAP = {"⚪️":0, "🟡":1, "🟠":2, "🔴":3, "🟣":4, "none":0, None:0}
 
 # --- Preprocessing ---
@@ -212,13 +236,16 @@ def compute_baseline(num_df):
     return median, mad
 
 # --- Refined migraine scoring ---
-def score_migraine_refined(num_df, median, mad, weights=SYMPTOM_WEIGHTS, daily_features=None):
+def score_migraine_refined(num_df, median, mad, weights=None, daily_features=None):
     """
     Returns weighted migraine score with:
     - Cluster emphasis
     - Downweighting if POTS-like tachycardia pattern is present
     - Optional inclusion of sleep and HR features from daily_features
     """
+    if weights is None:
+        weights = SYMPTOM_WEIGHTS
+
     z_scores = (num_df - median) / mad
     z_scores = z_scores.clip(lower=0)
 
@@ -250,7 +277,7 @@ def score_migraine_refined(num_df, median, mad, weights=SYMPTOM_WEIGHTS, daily_f
         migraine_score = migraine_score * (1 - tachy_downweight)
 
     return migraine_score
-
+    
 # --- Refined episode detection ---
 def detect_migraine_episodes_refined(migraine_score, threshold=3, min_duration=1):
     """
