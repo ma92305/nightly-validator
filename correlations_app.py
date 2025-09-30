@@ -268,14 +268,29 @@ def score_migraine_refined(num_df, median, mad, weights=None, daily_features=Non
 
     # Downweight if POTS-like episode (tachycardia + other POTS symptoms) detected
     if daily_features is not None and "HR_avg" in daily_features.columns:
+        # Ensure indices are datetime
+        daily_features = daily_features.copy()
+        if not pd.api.types.is_datetime64_any_dtype(daily_features.index):
+            daily_features.index = pd.to_datetime(daily_features.index, errors='coerce')
+    
+        num_df = num_df.copy()
+        if not pd.api.types.is_datetime64_any_dtype(num_df.index):
+            num_df.index = pd.to_datetime(num_df.index, errors='coerce')
+    
         hr_series = daily_features["HR_avg"]
         tachy_downweight = pd.Series(0, index=num_df.index)
+        
         for ts in num_df.index:
+            if pd.isna(ts):
+                continue  # skip invalid timestamps
+    
             # nearest daily timestamp
             nearest_idx = daily_features.index.get_indexer([ts], method="nearest")[0]
             hr = hr_series.iloc[nearest_idx]
+    
             if hr >= 100 and (num_df.loc[ts, POTS_SYMPTOMS[1:]].sum() >= 2):
                 tachy_downweight[ts] = 0.7  # downweight migraine score
+    
         migraine_score = migraine_score * (1 - tachy_downweight)
 
     return migraine_score
