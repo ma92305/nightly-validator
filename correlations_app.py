@@ -261,7 +261,7 @@ def show_correlation_page(sheets):
         "The strongest correlations are summarized in easy-to-read plain English with a certainty meter."
     )
 
-    # 1) Build daily aggregates
+    # 1) Build daily aggregates for correlations
     with st.spinner("Aggregating daily features..."):
         daily = compute_daily_aggregates(sheets)
 
@@ -272,7 +272,6 @@ def show_correlation_page(sheets):
 
     st.subheader("Preview daily features")
     st.dataframe(daily.tail(50))
-
     all_cols = daily.columns.tolist()
     if len(all_cols) < 2:
         st.warning("Not enough features to compute correlations.")
@@ -373,29 +372,34 @@ def show_correlation_page(sheets):
     else:
         st.write("No correlations found.")
 
-        # 3) Migraine detection
+        # -----------------------------
+    # 3) Migraine detection
+    # -----------------------------
     st.markdown("---")
     st.subheader("Migraine Detection")
-    
-    # Make sure your daily DataFrame contains symptom columns
-    symptom_df = daily  # or daily[SYMPTOM_COLUMNS] if stored separately
-    
-    # --- Debugging symptom columns ---
-    st.subheader("Symptom columns check")
-    st.write("Columns in daily DataFrame:", daily.columns.tolist())
-    
-    # Check which migraine symptoms are actually present
-    present_symptoms = [col for col in MIGRAINE_SYMPTOMS if col in daily.columns]
-    missing_symptoms = [col for col in MIGRAINE_SYMPTOMS if col not in daily.columns]
-    
-    st.write("Migraine symptom columns found:", present_symptoms)
-    st.write("Migraine symptom columns missing:", missing_symptoms)
-    
-    # Optional: preview first few rows
+
+    # Find the sheet with timestamped symptom data
+    symptom_sheet_name = None
+    for name, df in sheets.items():
+        missing_symptoms = [s for s in MIGRAINE_SYMPTOMS if s not in df.columns]
+        if not missing_symptoms:
+            symptom_sheet_name = name
+            break
+
+    if symptom_sheet_name is None:
+        st.warning("No sheet with timestamped migraine symptom columns found.")
+        st.write("Expected columns:", MIGRAINE_SYMPTOMS)
+        return
+
+    symptom_df = sheets[symptom_sheet_name]
+    st.write(f"Using sheet '{symptom_sheet_name}' for migraine detection.")
+
+    # Optional debug print
+    st.write("Columns in symptom DataFrame:", symptom_df.columns.tolist())
     st.write("Sample symptom data:")
-    st.dataframe(daily.head(5))
-    
-    # Then run the preprocessing as before
+    st.dataframe(symptom_df[MIGRAINE_SYMPTOMS].head(10))
+
+    # Preprocess and score migraines
     num_df = preprocess_symptom_matrix(symptom_df)
     median, mad = compute_baseline(num_df)
     migraine_score = score_migraine(num_df, median, mad)
