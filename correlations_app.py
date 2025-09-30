@@ -373,15 +373,31 @@ def show_correlation_page(sheets):
     else:
         st.write("No correlations found.")
 
-    # 3) Migraine detection
+        # 3) Migraine detection
     st.markdown("---")
     st.subheader("Migraine Detection")
     
     # Make sure your daily DataFrame contains symptom columns
     symptom_df = daily  # or daily[SYMPTOM_COLUMNS] if stored separately
+    
+    # --- Debugging symptom columns ---
+    st.subheader("Symptom columns check")
+    st.write("Columns in daily DataFrame:", daily.columns.tolist())
+    
+    # Check which migraine symptoms are actually present
+    present_symptoms = [col for col in MIGRAINE_SYMPTOMS if col in daily.columns]
+    missing_symptoms = [col for col in MIGRAINE_SYMPTOMS if col not in daily.columns]
+    
+    st.write("Migraine symptom columns found:", present_symptoms)
+    st.write("Migraine symptom columns missing:", missing_symptoms)
+    
+    # Optional: preview first few rows
+    st.write("Sample symptom data:")
+    st.dataframe(daily.head(5))
+    
+    # Then run the preprocessing as before
     num_df = preprocess_symptom_matrix(symptom_df)
     median, mad = compute_baseline(num_df)
     migraine_score = score_migraine(num_df, median, mad)
     episodes = detect_migraine_episodes(migraine_score, threshold=3)
     display_migraine_episodes(st, symptom_df, migraine_score, episodes)
-    
