@@ -362,6 +362,8 @@ def display_migraine_episodes_refined(st, symptom_df, migraine_score, episodes):
     if not episodes_to_show:
         st.write("No episodes meet the criteria to display.")
         return
+        
+    episodes_to_show = sorted(episodes_to_show, key=lambda ep: ep['start'], reverse=True)
 
     # Preprocess symptom matrix
     num_df = preprocess_symptom_matrix(symptom_df)
