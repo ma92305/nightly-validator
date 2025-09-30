@@ -158,7 +158,7 @@ SEVERITY_MAP = {"⚪️":0,"🟡":1,"🟠":2,"🔴":3,"🟣":4,"none":0,None:0}
 MIGRAINE_SYMPTOMS = sorted(list({s for c in MIGRAINE_CLUSTERS for s in c}))
 ALL_SYMPTOMS = sorted(list({s for c in MIGRAINE_CLUSTERS for s in c} | set(POTS_SYMPTOMS) | set(FUZZINESS_COMPONENTS)))
 
-def preprocess_symptom_matrix(symptom_df):
+def preprocess_symptom_matrix_ffill(symptom_df):
     """
     Converts long- or wide-format symptom logs into a numeric DataFrame with fill-forward logic.
     Each symptom’s last reported severity persists until updated.
@@ -450,7 +450,7 @@ def show_correlation_page(sheets):
     st.write(f"Using sheet '{symptom_sheet_name}' for migraine detection.")
     st.write("Sample data:")
     st.dataframe(symptom_df.head(10))
-    num_df=preprocess_symptom_matrix(symptom_df)
+    num_df=preprocess_symptom_matrix_ffill(symptom_df)
     median,mad=compute_baseline(num_df)
     migraine_score=score_migraine_refined(num_df,median,mad,weights=SYMPTOM_WEIGHTS,daily_features=daily)
     episodes=detect_migraine_episodes_refined(migraine_score,num_df,threshold=3,min_duration=1)
