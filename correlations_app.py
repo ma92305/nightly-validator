@@ -270,9 +270,10 @@ def detect_migraine_episodes(migraine_score, threshold=3, min_duration=1):
             })
     return episodes
 
-def display_migraine_episodes(st, symptom_df, migraine_score, episodes):
+def display_migraine_episodes(st, num_df, migraine_score, episodes):
     """
     Streamlit display for detected migraine episodes.
+    num_df: numeric symptom matrix with datetime index
     """
     st.subheader("Migraine Episode Analysis")
     if not episodes:
@@ -282,9 +283,19 @@ def display_migraine_episodes(st, symptom_df, migraine_score, episodes):
     for i, ep in enumerate(episodes, 1):
         st.markdown(f"**Episode {i}**")
         st.write(f"Start: {ep['start']}, End: {ep['end']}, Peak score: {ep['peak_score']:.2f}")
-        st.write("Snapshot of symptoms at peak:")
+
+        # Find peak time
         peak_time = migraine_score[ep['start']:ep['end']].idxmax()
-        snapshot = symptom_df.loc[peak_time, MIGRAINE_SYMPTOMS]
+
+        # Safely slice numeric dataframe
+        if peak_time in num_df.index:
+            snapshot = num_df.loc[peak_time, MIGRAINE_SYMPTOMS]
+        else:
+            # fallback: nearest timestamp
+            snapshot = num_df.iloc[(num_df.index - peak_time).abs().argmin()]
+            st.write("(Used nearest timestamp for snapshot)")
+
+        st.write("Snapshot of symptoms at peak:")
         st.dataframe(snapshot.to_frame("Severity"))
 
 # --- Main Streamlit app ---
