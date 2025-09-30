@@ -171,15 +171,36 @@ SEVERITY_MAP = {"⚪️":0, "🟡":1, "🟠":2, "🔴":3, "🟣":4, "none":0, No
 
 def preprocess_symptom_matrix(symptom_df):
     """
-    Convert emoji severity values into numeric matrix.
-    Works for both long-format and wide-format sheets.
+    Convert symptom DataFrame to numeric matrix.
+    Handles both wide-format and long-format sheets.
     """
-    # Replace emojis with numbers
-    num_df = symptom_df[MIGRAINE_SYMPTOMS].replace(SEVERITY_MAP)
-    
-    # Force numeric type (coerce invalid entries to 0)
+    # Check if sheet is wide format
+    missing_cols = [s for s in MIGRAINE_SYMPTOMS if s not in symptom_df.columns]
+    if not missing_cols:
+        # Already wide format
+        num_df = symptom_df[MIGRAINE_SYMPTOMS].replace(SEVERITY_MAP)
+    else:
+        # Likely long format: columns "Timestamp", "Symptom", "Severity"
+        if not {"Timestamp", "Symptom", "Severity"}.issubset(symptom_df.columns):
+            raise ValueError(
+                "Sheet does not contain expected columns for long format: 'Timestamp', 'Symptom', 'Severity'"
+            )
+        # Pivot to wide format
+        symptom_wide = symptom_df.pivot_table(
+            index="Timestamp",
+            columns="Symptom",
+            values="Severity",
+            aggfunc="first"  # take first if duplicates
+        )
+        # Add missing symptom columns
+        for s in MIGRAINE_SYMPTOMS:
+            if s not in symptom_wide.columns:
+                symptom_wide[s] = 0
+        # Replace emojis with numbers
+        num_df = symptom_wide[MIGRAINE_SYMPTOMS].replace(SEVERITY_MAP)
+
+    # Force numeric type
     num_df = num_df.apply(pd.to_numeric, errors='coerce').fillna(0)
-    
     return num_df
 
 def compute_baseline(num_df):
