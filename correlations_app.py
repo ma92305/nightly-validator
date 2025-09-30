@@ -180,16 +180,16 @@ def preprocess_symptom_matrix(symptom_df):
         # Already wide format
         num_df = symptom_df[MIGRAINE_SYMPTOMS].replace(SEVERITY_MAP)
     else:
-        # Likely long format: columns "Timestamp", "Symptom", "Severity"
-        if not {"Timestamp", "Symptom", "Severity"}.issubset(symptom_df.columns):
+        # Likely long format: columns "time", "item", "severity"
+        if not {"time", "item", "severity"}.issubset(symptom_df.columns):
             raise ValueError(
-                "Sheet does not contain expected columns for long format: 'Timestamp', 'Symptom', 'Severity'"
+                "Sheet does not contain expected columns for long format: 'time', 'item', 'severity'"
             )
         # Pivot to wide format
         symptom_wide = symptom_df.pivot_table(
-            index="Timestamp",
-            columns="Symptom",
-            values="Severity",
+            index="time",
+            columns="item",
+            values="severity",
             aggfunc="first"  # take first if duplicates
         )
         # Add missing symptom columns
