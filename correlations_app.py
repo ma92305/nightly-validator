@@ -185,13 +185,13 @@ SEVERITY_MAP = {"⚪️":0, "🟡":1, "🟠":2, "🔴":3, "🟣":4, "none":0, No
 
 MIGRAINE_SYMPTOMS = sorted(list({symptom for cluster in MIGRAINE_CLUSTERS for symptom in cluster}))
 
-ALL_SYMPTOMS = sorted(list({symptom for cluster in MIGRAINE_CLUSTERS for symptom in cluster} | set(POTS_SYMPTOMS)))
+ALL_SYMPTOMS = sorted(list({symptom for cluster in MIGRAINE_CLUSTERS for symptom in cluster} | set(POTS_SYMPTOMS) | set(FUZZINESS_COMPONENTS)))
 
 # --- Preprocessing ---
 def preprocess_symptom_matrix(symptom_df):
     # wide format
     if all(s in symptom_df.columns for s in MIGRAINE_SYMPTOMS):
-        num_df = symptom_df[ALL_SYMPTOMS].replace(SEVERITY_MAP)
+        num_df = symptom_df[ALL_SYMPTOMS].copy()
     else:
         # long format
         if not {"time", "item", "severity"}.issubset(symptom_df.columns):
@@ -203,13 +203,18 @@ def preprocess_symptom_matrix(symptom_df):
             values="severity",
             aggfunc="first"
         )
+
+        # Add missing columns with 0
         for s in ALL_SYMPTOMS:
             if s not in symptom_wide.columns:
                 symptom_wide[s] = 0
-        num_df = symptom_wide[ALL_SYMPTOMS].replace(SEVERITY_MAP)
 
-    num_df = num_df.apply(pd.to_numeric, errors='coerce').fillna(0)
+        num_df = symptom_wide[ALL_SYMPTOMS].copy()
+
+    # Replace emojis / severity with numeric
+    num_df = num_df.replace(SEVERITY_MAP).apply(pd.to_numeric, errors='coerce').fillna(0)
     
+    # Ensure datetime index
     if not pd.api.types.is_datetime64_any_dtype(num_df.index):
         num_df.index = pd.to_datetime(num_df.index, errors='coerce')
 
