@@ -6,56 +6,6 @@ import numpy as np
 from correlations import compute_daily_aggregates, compute_pairwise_cross_group_matrix
 import matplotlib.pyplot as plt
 
-def detect_migraine_days(daily_df, migraine_col="migraine"):
-    """
-    Returns indices of migraine days based on daily_df.
-    """
-    if migraine_col not in daily_df.columns:
-        return []
-
-    migraine_days = daily_df.index[daily_df[migraine_col] == 1].tolist()
-    return migraine_days
-
-
-def identify_prodrome_signs(daily_df, migraine_col="migraine", lookback=1, min_count=3):
-    """
-    Identify symptoms/conditions that appear in prodrome (1 day before migraine) more often than baseline.
-    """
-    if migraine_col not in daily_df.columns:
-        return pd.DataFrame()
-
-    migraine_days = detect_migraine_days(daily_df, migraine_col)
-    if not migraine_days:
-        return pd.DataFrame()
-
-    # Collect prodrome days (lookback days before migraine)
-    prodrome_days = []
-    for d in migraine_days:
-        if d - lookback in daily_df.index:
-            prodrome_days.append(d - lookback)
-
-    if not prodrome_days:
-        return pd.DataFrame()
-
-    # Candidate columns = all binary/symptom-like columns except migraine flag
-    symptom_cols = [c for c in daily_df.columns if c != migraine_col]
-
-    records = []
-    for col in symptom_cols:
-        prod_freq = daily_df.loc[prodrome_days, col].mean()
-        base_freq = daily_df.loc[daily_df.index.difference(migraine_days + prodrome_days), col].mean()
-
-        if prod_freq > base_freq and daily_df.loc[prodrome_days, col].sum() >= min_count:
-            records.append({
-                "Symptom": col,
-                "Prodrome Frequency": prod_freq,
-                "Baseline Frequency": base_freq,
-                "Lift": prod_freq - base_freq
-            })
-
-    results = pd.DataFrame(records).sort_values(by="Lift", ascending=False)
-    return results
-
 def get_threshold_description(feature_name, daily_data):
     """
     Returns a human-readable threshold description for a given feature.
@@ -306,20 +256,3 @@ def show_correlation_page(sheets):
             st.write("No borderline correlations found.")
     else:
         st.write("No correlations found.")
-
-    # --- Migraine episode analysis ---
-    st.markdown("---")
-    st.header("Migraine Episode Analysis")
-
-    migraine_days = detect_migraine_days(daily)
-    st.write(f"Detected {len(migraine_days)} migraine days.")
-
-    if migraine_days:
-        prodrome_signs = identify_prodrome_signs(daily)
-        if not prodrome_signs.empty:
-            st.subheader("Likely Prodrome Warning Signs (1 day before)")
-            st.dataframe(prodrome_signs, use_container_width=True)
-        else:
-            st.info("No strong prodrome patterns detected.")
-    else:
-        st.info("No migraine days found in dataset.")
