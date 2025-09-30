@@ -1,4 +1,3 @@
-
 # correlations_app.py
 import streamlit as st
 import pandas as pd
@@ -186,44 +185,33 @@ SEVERITY_MAP = {"⚪️":0, "🟡":1, "🟠":2, "🔴":3, "🟣":4, "none":0, No
 
 MIGRAINE_SYMPTOMS = sorted(list({symptom for cluster in MIGRAINE_CLUSTERS for symptom in cluster}))
 
+ALL_SYMPTOMS = sorted(list({symptom for cluster in MIGRAINE_CLUSTERS for symptom in cluster} | set(POTS_SYMPTOMS)))
+
 # --- Preprocessing ---
 def preprocess_symptom_matrix(symptom_df):
-    """
-    Convert symptom DataFrame to numeric matrix.
-    Handles both wide-format and long-format sheets.
-    Ensures datetime index for proper timestamp operations.
-    """
-    # Detect wide format
+    # wide format
     if all(s in symptom_df.columns for s in MIGRAINE_SYMPTOMS):
-        num_df = symptom_df[MIGRAINE_SYMPTOMS].replace(SEVERITY_MAP)
+        num_df = symptom_df[ALL_SYMPTOMS].replace(SEVERITY_MAP)
     else:
-        # Check for long-format columns
+        # long format
         if not {"time", "item", "severity"}.issubset(symptom_df.columns):
-            raise ValueError(
-                "Sheet must contain either wide-format migraine symptoms or long-format ['time','item','severity'] columns"
-            )
-        # Pivot long format to wide
+            raise ValueError("Sheet must contain either wide-format migraine symptoms or long-format ['time','item','severity']")
+        
         symptom_wide = symptom_df.pivot_table(
             index="time",
             columns="item",
             values="severity",
             aggfunc="first"
         )
-        # Add missing columns with 0
-        for s in MIGRAINE_SYMPTOMS:
+        for s in ALL_SYMPTOMS:
             if s not in symptom_wide.columns:
                 symptom_wide[s] = 0
-        num_df = symptom_wide[MIGRAINE_SYMPTOMS].replace(SEVERITY_MAP)
+        num_df = symptom_wide[ALL_SYMPTOMS].replace(SEVERITY_MAP)
 
-    # Force numeric type and fill NaNs
     num_df = num_df.apply(pd.to_numeric, errors='coerce').fillna(0)
-
-    # Ensure datetime index if possible
+    
     if not pd.api.types.is_datetime64_any_dtype(num_df.index):
-        try:
-            num_df.index = pd.to_datetime(num_df.index)
-        except Exception:
-            pass  # leave as-is if cannot convert
+        num_df.index = pd.to_datetime(num_df.index, errors='coerce')
 
     return num_df
     
