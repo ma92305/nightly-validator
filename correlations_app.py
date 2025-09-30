@@ -184,6 +184,8 @@ SYMPTOM_WEIGHTS = {
 
 SEVERITY_MAP = {"⚪️":0, "🟡":1, "🟠":2, "🔴":3, "🟣":4, "none":0, None:0}
 
+MIGRAINE_SYMPTOMS = sorted(list({symptom for cluster in MIGRAINE_CLUSTERS for symptom in cluster}))
+
 # --- Preprocessing ---
 def preprocess_symptom_matrix(symptom_df):
     """
