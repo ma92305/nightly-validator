@@ -291,7 +291,7 @@ def display_migraine_episodes_refined(st,symptom_df,migraine_score,episodes):
         st.write("No episodes meet the criteria to display.")
         return
     episodes_to_show=sorted(episodes_to_show,key=lambda ep:ep['start'],reverse=True)
-    num_df=preprocess_symptom_matrix(symptom_df)
+    num_df=preprocess_symptom_matrix_ffill(symptom_df)
     for i,ep in enumerate(episodes_to_show,1):
         st.markdown(f"**Episode {i}**")
         st.write(f"Start: {ep['start']}, End: {ep['end']}, Peak score: {ep['peak_score']:.2f}")
