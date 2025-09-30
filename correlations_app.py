@@ -238,68 +238,63 @@ def compute_baseline(num_df):
     return median, mad
 
 # --- Refined migraine scoring ---
-def score_migraine_refined(num_df, median, mad, weights=None, daily_features=None):
+def score_migraine_refined(num_df, median, mad, weights=None, daily_features=None, cluster_bonus_scale=0.4):
     """
-    Returns weighted migraine score with:
-    - Cluster emphasis
-    - Downweighting if POTS-like tachycardia pattern is present
-    - Optional inclusion of sleep and HR features from daily_features
+    Conservative migraine scoring.
+    Returns a series of migraine scores.
     """
     if weights is None:
         weights = SYMPTOM_WEIGHTS
 
+    # 1) Compute z-scores and cap at 1
     z_scores = (num_df - median) / mad
-    z_scores = z_scores.clip(lower=0)
+    z_scores = z_scores.clip(lower=0, upper=1.0)
 
-    # Add fuzziness components
+    # 2) Add fuzziness components (average of components)
     if "Fuzziness" in num_df.columns:
         z_scores["Fuzziness"] = num_df[FUZZINESS_COMPONENTS].sum(axis=1) / len(FUZZINESS_COMPONENTS)
+        z_scores["Fuzziness"] = z_scores["Fuzziness"].clip(0, 0.5)  # fuzziness minor weight
 
-    # Cluster weighting: give extra weight if multiple cluster symptoms present
-    cluster_bonus = pd.Series(0, index=num_df.index)
+    # 3) Cluster bonus proportional to fraction of cluster present
+    cluster_bonus = pd.Series(0, index=num_df.index, dtype=float)
     for cluster in MIGRAINE_CLUSTERS:
-        present = (z_scores[cluster] > 0).sum(axis=1)
-        cluster_bonus += (present >= 2).astype(int) * 0.5  # bonus if 2+ symptoms present in cluster
+        present = (z_scores[cluster] > 0).sum(axis=1) / len(cluster)
+        cluster_bonus += present * cluster_bonus_scale
 
-    # Base weighted score
+    # 4) Weighted sum of symptoms
     weight_series = pd.Series(weights)
     weighted_scores = z_scores * weight_series
     migraine_score = weighted_scores.sum(axis=1) + cluster_bonus
 
-    # Downweight if POTS-like episode (tachycardia + other POTS symptoms) detected
+    # 5) Downweight POTS-like episodes
     if daily_features is not None and "HR_avg" in daily_features.columns:
-        # Ensure indices are datetime
         daily_features = daily_features.copy()
         if not pd.api.types.is_datetime64_any_dtype(daily_features.index):
             daily_features.index = pd.to_datetime(daily_features.index, errors='coerce')
-    
-        num_df = num_df.copy()
-        if not pd.api.types.is_datetime64_any_dtype(num_df.index):
-            num_df.index = pd.to_datetime(num_df.index, errors='coerce')
-    
-        hr_series = daily_features["HR_avg"]
-        tachy_downweight = pd.Series(0, index=num_df.index)
-        
+
+        tachy_downweight = pd.Series(0, index=num_df.index, dtype=float)
         for ts in num_df.index:
             if pd.isna(ts):
-                continue  # skip invalid timestamps
-    
-            # nearest daily timestamp
+                continue
             nearest_idx = daily_features.index.get_indexer([ts], method="nearest")[0]
-            hr = hr_series.iloc[nearest_idx]
-    
-            if hr >= 100 and (num_df.loc[ts, POTS_SYMPTOMS[1:]].sum() >= 2):
-                tachy_downweight[ts] = 0.7  # downweight migraine score
-    
+            hr = daily_features["HR_avg"].iloc[nearest_idx]
+            # downweight if tachycardia + >=2 other POTS symptoms
+            pots_count = num_df.loc[ts, POTS_SYMPTOMS[1:]].sum()
+            if hr >= 100 and pots_count >= 2:
+                tachy_downweight[ts] = 0.7
         migraine_score = migraine_score * (1 - tachy_downweight)
+
+    # 6) Minimum threshold: require at least 2 core migraine symptoms for any score
+    core_symptoms = ["Headache", "Left side headache", "Right side headache", "Nausea", "Vision issues"]
+    has_core = (num_df[core_symptoms] > 0).sum(axis=1) >= 2
+    migraine_score = migraine_score.where(has_core, 0)
 
     return migraine_score
     
-# --- Refined episode detection ---
-def detect_migraine_episodes_refined(migraine_score, threshold=3, min_duration=1):
+def detect_migraine_episodes_refined(migraine_score, threshold=3.0, min_duration=2):
     """
-    Identify consecutive timestamps where weighted migraine_score exceeds threshold.
-    Returns list of dicts with start, end, and peak score timestamps.
+    Detect episodes above threshold with minimum duration.
+    Returns a list of dicts with start, end, and peak.
     """
     episodes = []
     in_episode = False
@@ -313,20 +308,23 @@ def detect_migraine_episodes_refined(migraine_score, threshold=3, min_duration=1
         else:
             if in_episode:
                 end_idx = idx
-                if (migraine_score.loc[start_idx:end_idx].shape[0] >= min_duration):
+                duration = (migraine_score.loc[start_idx:end_idx].shape[0])
+                if duration >= min_duration:
                     episodes.append({
                         "start": start_idx,
                         "end": end_idx,
-                        "peak_score": migraine_score[start_idx:end_idx].max()
+                        "peak_score": migraine_score.loc[start_idx:end_idx].max()
                     })
                 in_episode = False
+    # handle last episode
     if in_episode:
         end_idx = migraine_score.index[-1]
-        if (migraine_score.loc[start_idx:end_idx].shape[0] >= min_duration):
+        duration = (migraine_score.loc[start_idx:end_idx].shape[0])
+        if duration >= min_duration:
             episodes.append({
                 "start": start_idx,
                 "end": end_idx,
-                "peak_score": migraine_score[start_idx:].max()
+                "peak_score": migraine_score.loc[start_idx:end_idx].max()
             })
     return episodes
 
