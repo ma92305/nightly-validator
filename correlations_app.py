@@ -171,8 +171,26 @@ SEVERITY_MAP = {"⚪️":0, "🟡":1, "🟠":2, "🔴":3, "🟣":4, "none":0, No
 
 def preprocess_symptom_matrix(symptom_df):
     """
-    Convert emoji severity values into numeric matrix.
+    Convert symptom sheet to numeric wide-format matrix (rows=time, columns=symptoms).
+    Supports:
+        - Wide-format: columns = MIGRAINE_SYMPTOMS
+        - Long-format: columns = ['item', 'time', 'severity']
     """
+    # Detect long-format
+    if {'item', 'time', 'severity'}.issubset(symptom_df.columns):
+        wide_df = symptom_df.pivot_table(
+            index='time',
+            columns='item',
+            values='severity',
+            aggfunc='last'
+        ).reset_index()
+        # Ensure all symptoms exist
+        for symptom in MIGRAINE_SYMPTOMS:
+            if symptom not in wide_df.columns:
+                wide_df[symptom] = 0
+        symptom_df = wide_df.set_index('time')
+
+    # Replace emoji/severity values with numeric, fill missing
     num_df = symptom_df[MIGRAINE_SYMPTOMS].replace(SEVERITY_MAP).fillna(0)
     return num_df
 
@@ -372,34 +390,40 @@ def show_correlation_page(sheets):
     else:
         st.write("No correlations found.")
 
-        # -----------------------------
+    # -----------------------------
     # 3) Migraine detection
     # -----------------------------
     st.markdown("---")
     st.subheader("Migraine Detection")
-
-    # Find the sheet with timestamped symptom data
+    
     symptom_sheet_name = None
+    symptom_df = None
+    
+    # Look for a wide-format sheet first
     for name, df in sheets.items():
-        missing_symptoms = [s for s in MIGRAINE_SYMPTOMS if s not in df.columns]
-        if not missing_symptoms:
+        if all(s in df.columns for s in MIGRAINE_SYMPTOMS):
             symptom_sheet_name = name
+            symptom_df = df.copy()
             break
-
+    
+    # If no wide-format sheet, look for long-format sheet
     if symptom_sheet_name is None:
-        st.warning("No sheet with timestamped migraine symptom columns found.")
-        st.write("Expected columns:", MIGRAINE_SYMPTOMS)
+        for name, df in sheets.items():
+            if {'item', 'time', 'severity'}.issubset(df.columns):
+                symptom_sheet_name = name
+                symptom_df = df.copy()
+                break
+    
+    if symptom_sheet_name is None:
+        st.warning("No sheet with timestamped migraine symptom data found.")
+        st.write("Expected columns: wide-format symptoms OR long-format ['item','time','severity']")
         return
-
-    symptom_df = sheets[symptom_sheet_name]
+    
     st.write(f"Using sheet '{symptom_sheet_name}' for migraine detection.")
-
-    # Optional debug print
-    st.write("Columns in symptom DataFrame:", symptom_df.columns.tolist())
-    st.write("Sample symptom data:")
-    st.dataframe(symptom_df[MIGRAINE_SYMPTOMS].head(10))
-
-    # Preprocess and score migraines
+    st.write("Sample data:")
+    st.dataframe(symptom_df.head(10))
+    
+    # Preprocess (handles long or wide internally)
     num_df = preprocess_symptom_matrix(symptom_df)
     median, mad = compute_baseline(num_df)
     migraine_score = score_migraine(num_df, median, mad)
