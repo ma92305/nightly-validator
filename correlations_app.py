@@ -331,12 +331,21 @@ def display_migraine_episodes_refined(st, symptom_df, migraine_score, episodes):
     if not episodes:
         st.write("No migraine episodes detected.")
         return
+        
+    show_borderline = st.checkbox(
+        "Show borderline migraine episodes (mild, may not require rescue meds)",
+        value=False
+    )
 
     num_df = preprocess_symptom_matrix(symptom_df)
     for i, ep in enumerate(episodes, 1):
+        # Skip borderline episodes if checkbox is not selected
+        if ep['peak_score'] < 3.0 and not show_borderline:
+            continue
+    
         st.markdown(f"**Episode {i}**")
         st.write(f"Start: {ep['start']}, End: {ep['end']}, Peak score: {ep['peak_score']:.2f}")
-
+    
         peak_time = migraine_score[ep['start']:ep['end']].idxmax()
         if peak_time in num_df.index:
             snapshot = num_df.loc[peak_time]
@@ -344,10 +353,10 @@ def display_migraine_episodes_refined(st, symptom_df, migraine_score, episodes):
             nearest_idx = ((num_df.index - peak_time).total_seconds().abs()).argmin()
             snapshot = num_df.iloc[nearest_idx]
             st.write("(Used nearest timestamp for snapshot)")
-
+    
         st.write("Snapshot of symptoms at peak:")
         st.dataframe(snapshot.to_frame("Severity"))
-        
+            
 # --- Main Streamlit app ---
 def show_correlation_page(sheets):
     st.title("Correlation Explorer — Health Logs")
