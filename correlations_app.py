@@ -197,9 +197,11 @@ def preprocess_symptom_matrix(symptom_df):
 def compute_baseline(num_df):
     """
     Compute median and MAD for each symptom to define typical baseline.
+    Uses manual MAD calculation to support newer pandas versions.
     """
     median = num_df.median()
-    mad = num_df.mad()  # prevent division by zero
+    mad = (num_df - median).abs().median()  # median absolute deviation
+    # Prevent division by zero
     mad = mad.replace(0, 1)
     return median, mad
 
