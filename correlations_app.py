@@ -137,252 +137,138 @@ def diary_style_desc_with_threshold(row, daily):
     return f"{threshold_desc} is linked to a {percent_effect}{verb} {f2_clean} — Certainty: {certainty}/100"
 
 # -----------------------------
-# Migraine detection with POTS/tachycardia integration
+# Migraine detection with POTS integration
 # -----------------------------
-
-import pandas as pd
-import numpy as np
-
-# Define symptom clusters based on research
 MIGRAINE_CLUSTERS = [
-    ["Headache", "Right side headache", "Left side headache"],  # Pain cluster
-    ["Nausea", "Sensory sensitivity", "Vision issues", "Eye pain", "Base of head pain"],  # Aura/autonomic
-    ["Neck pain", "Negative mood"]  # Prodrome/emotional
+    ["Headache","Right side headache","Left side headache"],
+    ["Nausea","Sensory sensitivity","Vision issues","Eye pain","Base of head pain"],
+    ["Neck pain","Negative mood"]
 ]
+POTS_SYMPTOMS = ["Tachycardia","Dizziness","Weakness/shakiness","Fatigue","Heavy eyes","Fuzziness"]
+FUZZINESS_COMPONENTS = ["Brain fog","Nausea","Weakness/shakiness"]
 
-POTS_SYMPTOMS = [
-    "Tachycardia", "Dizziness", "Weakness/shakiness", "Fatigue", "Heavy eyes", "Fuzziness"
-]
+SYMPTOM_WEIGHTS = {"Headache":2,"Right side headache":2,"Left side headache":2,"Nausea":1.5,
+                   "Sensory sensitivity":1.5,"Vision issues":1.5,"Eye pain":1.5,"Base of head pain":1.5,
+                   "Neck pain":1.2,"Fatigue":0.5,"Dizziness":0.5,"Fuzziness":0.5,"Weakness/shakiness":0.5,
+                   "Brain fog":0.5,"Heavy eyes":0.5,"Negative mood":0.3,"Overheating":0.3,"Bloating":0.2,
+                   "Low appetite/early satiety":0.2,"Stomach cramping":0.2}
 
-# Map fuzziness to relevant POTS indicators
-FUZZINESS_COMPONENTS = ["Brain fog", "Nausea", "Weakness/shakiness"]  # mimic POTS-like fuzziness
+SEVERITY_MAP = {"⚪️":0,"🟡":1,"🟠":2,"🔴":3,"🟣":4,"none":0,None:0}
 
-# --- Symptom weights for migraine scoring ---
-SYMPTOM_WEIGHTS = {
-    "Headache": 2,
-    "Right side headache": 2,
-    "Left side headache": 2,
-    "Nausea": 1.5,
-    "Sensory sensitivity": 1.5,
-    "Vision issues": 1.5,
-    "Eye pain": 1.5,
-    "Base of head pain": 1.5,
-    "Neck pain": 1.2,
-    "Fatigue": 0.5,
-    "Dizziness": 0.5,
-    "Fuzziness": 0.5,
-    "Weakness/shakiness": 0.5,
-    "Brain fog": 0.5,
-    "Heavy eyes": 0.5,
-    "Negative mood": 0.3,
-    "Overheating": 0.3,
-    "Bloating": 0.2,
-    "Low appetite/early satiety": 0.2,
-    "Stomach cramping": 0.2
-}
+MIGRAINE_SYMPTOMS = sorted(list({s for c in MIGRAINE_CLUSTERS for s in c}))
+ALL_SYMPTOMS = sorted(list({s for c in MIGRAINE_CLUSTERS for s in c} | set(POTS_SYMPTOMS) | set(FUZZINESS_COMPONENTS)))
 
-SEVERITY_MAP = {"⚪️":0, "🟡":1, "🟠":2, "🔴":3, "🟣":4, "none":0, None:0}
-
-MIGRAINE_SYMPTOMS = sorted(list({symptom for cluster in MIGRAINE_CLUSTERS for symptom in cluster}))
-
-ALL_SYMPTOMS = sorted(list({symptom for cluster in MIGRAINE_CLUSTERS for symptom in cluster} | set(POTS_SYMPTOMS) | set(FUZZINESS_COMPONENTS)))
-
-# --- Preprocessing ---
 def preprocess_symptom_matrix(symptom_df):
-    # wide format
     if all(s in symptom_df.columns for s in MIGRAINE_SYMPTOMS):
         num_df = symptom_df[ALL_SYMPTOMS].copy()
     else:
-        # long format
-        if not {"time", "item", "severity"}.issubset(symptom_df.columns):
-            raise ValueError("Sheet must contain either wide-format migraine symptoms or long-format ['time','item','severity']")
-        
-        symptom_wide = symptom_df.pivot_table(
-            index="time",
-            columns="item",
-            values="severity",
-            aggfunc="first"
-        )
-
-        # Add missing columns with 0
+        if not {"time","item","severity"}.issubset(symptom_df.columns):
+            raise ValueError("Sheet must contain wide-format or long-format ['time','item','severity']")
+        symptom_wide = symptom_df.pivot_table(index="time",columns="item",values="severity",aggfunc="first")
         for s in ALL_SYMPTOMS:
             if s not in symptom_wide.columns:
                 symptom_wide[s] = 0
-
         num_df = symptom_wide[ALL_SYMPTOMS].copy()
-
-    # Replace emojis / severity with numeric
-    num_df = num_df.replace(SEVERITY_MAP).apply(pd.to_numeric, errors='coerce').fillna(0)
-    
-    # Ensure datetime index
+    num_df = num_df.replace(SEVERITY_MAP).apply(pd.to_numeric,errors='coerce').fillna(0)
     if not pd.api.types.is_datetime64_any_dtype(num_df.index):
-        num_df.index = pd.to_datetime(num_df.index, errors='coerce')
-
+        num_df.index = pd.to_datetime(num_df.index,errors='coerce')
     return num_df
-    
+
 def compute_baseline(num_df):
-    """
-    Compute median and MAD (median absolute deviation) per symptom.
-    Returns median and mad Series for z-score calculations.
-    """
     median = num_df.median()
-    mad = (num_df - median).abs().median()  # median absolute deviation
-    mad = mad.replace(0, 1)  # avoid divide-by-zero errors
-    return median, mad
+    mad = (num_df - median).abs().median()
+    mad = mad.replace(0,1)
+    return median,mad
 
-# --- Refined migraine scoring ---
-def score_migraine_refined(num_df, median, mad, weights=None, daily_features=None, cluster_bonus_scale=0.4):
-    """
-    Conservative migraine scoring.
-    Returns a series of migraine scores.
-    """
-    if weights is None:
-        weights = SYMPTOM_WEIGHTS
-
-    # 1) Compute z-scores and cap at 1
-    z_scores = (num_df - median) / mad
-    z_scores = z_scores.clip(lower=0, upper=1.0)
-
-    # 2) Add fuzziness components (average of components)
+def score_migraine_refined(num_df,median,mad,weights=None,daily_features=None,cluster_bonus_scale=0.4):
+    if weights is None: weights = SYMPTOM_WEIGHTS
+    z_scores = (num_df - median)/mad
+    z_scores = z_scores.clip(lower=0,upper=1.0)
     if "Fuzziness" in num_df.columns:
-        z_scores["Fuzziness"] = num_df[FUZZINESS_COMPONENTS].sum(axis=1) / len(FUZZINESS_COMPONENTS)
-        z_scores["Fuzziness"] = z_scores["Fuzziness"].clip(0, 0.5)  # fuzziness minor weight
-
-    # 3) Cluster bonus proportional to fraction of cluster present
-    cluster_bonus = pd.Series(0, index=num_df.index, dtype=float)
+        z_scores["Fuzziness"] = num_df[FUZZINESS_COMPONENTS].sum(axis=1)/len(FUZZINESS_COMPONENTS)
+        z_scores["Fuzziness"] = z_scores["Fuzziness"].clip(0,0.5)
+    cluster_bonus = pd.Series(0,index=num_df.index,dtype=float)
     for cluster in MIGRAINE_CLUSTERS:
-        present = (z_scores[cluster] > 0).sum(axis=1) / len(cluster)
-        cluster_bonus += present * cluster_bonus_scale
-
-    # 4) Weighted sum of symptoms
-    weight_series = pd.Series(weights)
-    weighted_scores = z_scores * weight_series
-    migraine_score = weighted_scores.sum(axis=1) + cluster_bonus
-
-    # 5) Downweight POTS-like episodes
+        present = (z_scores[cluster]>0).sum(axis=1)/len(cluster)
+        cluster_bonus += present*cluster_bonus_scale
+    weighted_scores = z_scores*pd.Series(weights)
+    migraine_score = weighted_scores.sum(axis=1)+cluster_bonus
     if daily_features is not None and "HR_avg" in daily_features.columns:
         daily_features = daily_features.copy()
         if not pd.api.types.is_datetime64_any_dtype(daily_features.index):
-            daily_features.index = pd.to_datetime(daily_features.index, errors='coerce')
-
-        tachy_downweight = pd.Series(0, index=num_df.index, dtype=float)
+            daily_features.index = pd.to_datetime(daily_features.index,errors='coerce')
+        tachy_downweight = pd.Series(0,index=num_df.index,dtype=float)
         for ts in num_df.index:
-            if pd.isna(ts):
-                continue
-            nearest_idx = daily_features.index.get_indexer([ts], method="nearest")[0]
+            if pd.isna(ts): continue
+            nearest_idx = daily_features.index.get_indexer([ts],method="nearest")[0]
             hr = daily_features["HR_avg"].iloc[nearest_idx]
-            # downweight if tachycardia + >=2 other POTS symptoms
-            pots_count = num_df.loc[ts, POTS_SYMPTOMS[1:]].sum()
-            if hr >= 100 and pots_count >= 2:
-                tachy_downweight[ts] = 0.7
-        migraine_score = migraine_score * (1 - tachy_downweight)
-
-    # 6) Minimum threshold: require at least 2 core migraine symptoms for any score
-    core_symptoms = ["Headache", "Left side headache", "Right side headache", "Nausea", "Vision issues"]
-    has_core = (num_df[core_symptoms] > 0).sum(axis=1) >= 2
-    migraine_score = migraine_score.where(has_core, 0)
-
+            pots_count = num_df.loc[ts,POTS_SYMPTOMS[1:]].sum()
+            if hr >= 100 and pots_count >=2: tachy_downweight[ts]=0.7
+        migraine_score = migraine_score*(1-tachy_downweight)
+    core_symptoms = ["Headache","Left side headache","Right side headache","Nausea","Vision issues"]
+    has_core = (num_df[core_symptoms]>0).sum(axis=1)>=2
+    migraine_score = migraine_score.where(has_core,0)
     return migraine_score
-    
-def detect_migraine_episodes_refined(
-    migraine_score, 
-    num_df, 
-    threshold=3.0, 
-    min_duration=1,
-    core_symptoms=["Headache","Left side headache","Right side headache","Nausea","Vision issues"],
-    min_core_active=2,
-    min_weighted_sum=3.5,      # stricter
-    min_peak_score=4            # only recommendable episodes
-):
-    episodes = []
-    in_episode = False
-    start_idx = None
 
-    for idx, score in migraine_score.items():
-        if score >= threshold:
+def detect_migraine_episodes_refined(migraine_score,num_df,threshold=3.0,min_duration=1,
+                                     core_symptoms=["Headache","Left side headache","Right side headache","Nausea","Vision issues"],
+                                     min_core_active=2,min_weighted_sum=3.5,min_peak_score=4):
+    episodes=[]
+    in_episode=False
+    start_idx=None
+    for idx,score in migraine_score.items():
+        if score>=threshold:
             if not in_episode:
-                in_episode = True
-                start_idx = idx
+                in_episode=True
+                start_idx=idx
         else:
             if in_episode:
-                end_idx = idx
-                duration = (migraine_score.loc[start_idx:end_idx].shape[0])
-                if duration >= min_duration:
-                    snapshot = num_df.loc[start_idx:end_idx]
-                    core_active = (snapshot[core_symptoms] >= 2).sum(axis=1).max()
-                    weighted_sum = (snapshot * pd.Series(SYMPTOM_WEIGHTS)).sum(axis=1).mean()
-                    peak = migraine_score.loc[start_idx:end_idx].max()
-                    if core_active >= min_core_active and weighted_sum >= min_weighted_sum and peak >= min_peak_score:
-                        episodes.append({
-                            "start": start_idx,
-                            "end": end_idx,
-                            "peak_score": peak
-                        })
-                in_episode = False
-
-    # Handle last episode
+                end_idx=idx
+                duration=(migraine_score.loc[start_idx:end_idx].shape[0])
+                if duration>=min_duration:
+                    snapshot=num_df.loc[start_idx:end_idx]
+                    core_active=(snapshot[core_symptoms]>=2).sum(axis=1).max()
+                    weighted_sum=(snapshot*pd.Series(SYMPTOM_WEIGHTS)).sum(axis=1).mean()
+                    peak=migraine_score.loc[start_idx:end_idx].max()
+                    if core_active>=min_core_active and weighted_sum>=min_weighted_sum and peak>=min_peak_score:
+                        episodes.append({"start":start_idx,"end":end_idx,"peak_score":peak})
+                in_episode=False
     if in_episode:
-        end_idx = migraine_score.index[-1]
-        duration = (migraine_score.loc[start_idx:end_idx].shape[0])
-        snapshot = num_df.loc[start_idx:end_idx]
-        core_active = (snapshot[core_symptoms] >= 2).sum(axis=1).max()
-        weighted_sum = (snapshot * pd.Series(SYMPTOM_WEIGHTS)).sum(axis=1).mean()
-        peak = migraine_score.loc[start_idx:end_idx].max()
-        if duration >= min_duration and core_active >= min_core_active and weighted_sum >= min_weighted_sum and peak >= min_peak_score:
-            episodes.append({
-                "start": start_idx,
-                "end": end_idx,
-                "peak_score": peak
-            })
-
+        end_idx=migraine_score.index[-1]
+        duration=(migraine_score.loc[start_idx:end_idx].shape[0])
+        snapshot=num_df.loc[start_idx:end_idx]
+        core_active=(snapshot[core_symptoms]>=2).sum(axis=1).max()
+        weighted_sum=(snapshot*pd.Series(SYMPTOM_WEIGHTS)).sum(axis=1).mean()
+        peak=migraine_score.loc[start_idx:end_idx].max()
+        if duration>=min_duration and core_active>=min_core_active and weighted_sum>=min_weighted_sum and peak>=min_peak_score:
+            episodes.append({"start":start_idx,"end":end_idx,"peak_score":peak})
     return episodes
-    
-# --- Refined Streamlit display ---
-def display_migraine_episodes_refined(st, symptom_df, migraine_score, episodes):
-    """
-    Streamlit display for detected refined migraine episodes.
-    Handles nearest timestamp lookup for peak snapshot.
-    """
+
+def display_migraine_episodes_refined(st,symptom_df,migraine_score,episodes):
     st.subheader("Refined Migraine Episode Analysis")
     if not episodes:
         st.write("No migraine episodes detected.")
         return
-
-    show_borderline = st.checkbox(
-        "Show borderline migraine episodes (mild, may not require rescue meds)",
-        value=False
-    )
-
-    # Filter episodes based on checkbox
+    show_borderline=st.checkbox("Show borderline migraine episodes (mild, may not require rescue meds)",value=False)
     if not show_borderline:
-        episodes_to_show = [ep for ep in episodes if ep['peak_score'] >= 3.0]
+        episodes_to_show=[ep for ep in episodes if ep['peak_score']>=3.0]
     else:
-        episodes_to_show = episodes
-
+        episodes_to_show=episodes
     if not episodes_to_show:
         st.write("No episodes meet the criteria to display.")
         return
-        
-    episodes_to_show = sorted(episodes_to_show, key=lambda ep: ep['start'], reverse=True)
-
-    # Preprocess symptom matrix
-    num_df = preprocess_symptom_matrix(symptom_df)
-
-    # Display episodes
-    for i, ep in enumerate(episodes_to_show, 1):
+    episodes_to_show=sorted(episodes_to_show,key=lambda ep:ep['start'],reverse=True)
+    num_df=preprocess_symptom_matrix(symptom_df)
+    for i,ep in enumerate(episodes_to_show,1):
         st.markdown(f"**Episode {i}**")
         st.write(f"Start: {ep['start']}, End: {ep['end']}, Peak score: {ep['peak_score']:.2f}")
-
-        # Find snapshot at peak
-        peak_time = migraine_score[ep['start']:ep['end']].idxmax()
+        peak_time=migraine_score[ep['start']:ep['end']].idxmax()
         if peak_time in num_df.index:
-            snapshot = num_df.loc[peak_time]
+            snapshot=num_df.loc[peak_time]
         else:
-            # nearest timestamp if exact peak not present
-            nearest_idx = (abs(num_df.index - peak_time)).argmin()
-            snapshot = num_df.iloc[nearest_idx]
+            nearest_idx=(abs(num_df.index-peak_time)).argmin()
+            snapshot=num_df.iloc[nearest_idx]
             st.write("(Used nearest timestamp for snapshot)")
-
         st.write("Snapshot of symptoms at peak:")
         st.dataframe(snapshot.to_frame("Severity"))
         
@@ -506,63 +392,33 @@ def show_correlation_page(sheets):
         st.write("No correlations found.")
     
     # -----------------------------
-    # 3) Refined Migraine detection with POTS/tachycardia integration
+    # Refined Migraine Detection
     # -----------------------------
+    
     st.markdown("---")
     st.subheader("Refined Migraine Detection")
-    
-    symptom_sheet_name = None
-    symptom_df = None
-    
-    # Look for a wide-format sheet first
-    for name, df in sheets.items():
+    symptom_sheet_name=None
+    symptom_df=None
+    for name,df in sheets.items():
         if all(s in df.columns for s in MIGRAINE_SYMPTOMS):
-            symptom_sheet_name = name
-            symptom_df = df.copy()
+            symptom_sheet_name=name
+            symptom_df=df.copy()
             break
-    
-    # If no wide-format sheet, look for long-format sheet
     if symptom_sheet_name is None:
-        for name, df in sheets.items():
-            if {'item', 'time', 'severity'}.issubset(df.columns):
-                symptom_sheet_name = name
-                symptom_df = df.copy()
+        for name,df in sheets.items():
+            if {'item','time','severity'}.issubset(df.columns):
+                symptom_sheet_name=name
+                symptom_df=df.copy()
                 break
-    
     if symptom_sheet_name is None:
         st.warning("No sheet with timestamped migraine symptom data found.")
         st.write("Expected columns: wide-format symptoms OR long-format ['item','time','severity']")
         return
-    
     st.write(f"Using sheet '{symptom_sheet_name}' for migraine detection.")
     st.write("Sample data:")
     st.dataframe(symptom_df.head(10))
-    
-    # --- Preprocess symptom matrix ---
-    num_df = preprocess_symptom_matrix(symptom_df)
-    median, mad = compute_baseline(num_df)
-    
-    # --- Compute refined migraine score ---
-    migraine_score = score_migraine_refined(
-        num_df,
-        median,
-        mad,
-        weights=SYMPTOM_WEIGHTS,
-        daily_features=daily  # <-- include your daily features for HR/POTS integration
-    )
-    
-    # --- Detect refined episodes ---
-    episodes = detect_migraine_episodes_refined(
-        migraine_score,
-        num_df,             # <-- add this
-        threshold=3,
-        min_duration=1
-    )
-        
-    # --- Display episodes ---
-    display_migraine_episodes_refined(
-        st,
-        symptom_df,
-        migraine_score,
-        episodes
-    )
+    num_df=preprocess_symptom_matrix(symptom_df)
+    median,mad=compute_baseline(num_df)
+    migraine_score=score_migraine_refined(num_df,median,mad,weights=SYMPTOM_WEIGHTS,daily_features=daily)
+    episodes=detect_migraine_episodes_refined(migraine_score,num_df,threshold=3,min_duration=1)
+    display_migraine_episodes_refined(st,symptom_df,migraine_score,episodes)
