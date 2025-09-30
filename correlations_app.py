@@ -158,7 +158,7 @@ SEVERITY_MAP = {"⚪️":0,"🟡":1,"🟠":2,"🔴":3,"🟣":4,"none":0,None:0}
 MIGRAINE_SYMPTOMS = sorted(list({s for c in MIGRAINE_CLUSTERS for s in c}))
 ALL_SYMPTOMS = sorted(list({s for c in MIGRAINE_CLUSTERS for s in c} | set(POTS_SYMPTOMS) | set(FUZZINESS_COMPONENTS)))
 
-def preprocess_symptom_matrix_ffill(symptom_df):
+def preprocess_symptom_matrix(symptom_df):
     """
     Converts long- or wide-format symptom logs into a numeric DataFrame with fill-forward logic.
     Each symptom’s last reported severity persists until updated.
