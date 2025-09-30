@@ -229,9 +229,9 @@ def score_migraine_refined(num_df, median, mad, weights=None, daily_features=Non
 
     return migraine_score
 
-def detect_migraine_episodes_refined(migraine_score,num_df,threshold=3.0,min_duration=1,
+def detect_migraine_episodes_refined(migraine_score,num_df,threshold=2.5,min_duration=1,
                                      core_symptoms=["Headache","Left side headache","Right side headache","Nausea","Vision issues"],
-                                     min_core_active=2,min_weighted_sum=3.5,min_peak_score=4):
+                                     min_core_active=2,min_weighted_sum=3.0,min_peak_score=3.0):
     episodes=[]
     in_episode=False
     start_idx=None
