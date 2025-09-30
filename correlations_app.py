@@ -137,6 +137,122 @@ def diary_style_desc_with_threshold(row, daily):
 
     return f"{threshold_desc} is linked to a {percent_effect}{verb} {f2_clean} — Certainty: {certainty}/100"
 
+# -----------------------------
+# Migraine detection functions (weighted)
+# -----------------------------
+
+# Define symptoms with weights
+SYMPTOM_WEIGHTS = {
+    "Headache": 2,
+    "Right side headache": 2,
+    "Left side headache": 2,
+    "Nausea": 1.5,
+    "Sensory sensitivity": 1.5,
+    "Vision issues": 1.5,
+    "Eye pain": 1.5,
+    "Base of head pain": 1.5,
+    "Neck pain": 1.2,
+    "Fatigue": 0.5,
+    "Dizziness": 0.5,
+    "Fuzziness": 0.5,
+    "Weakness/shakiness": 0.5,
+    "Brain fog": 0.5,
+    "Heavy eyes": 0.5,
+    "Negative mood": 0.3,
+    "Overheating": 0.3,
+    "Bloating": 0.2,
+    "Low appetite/early satiety": 0.2,
+    "Stomach cramping": 0.2
+}
+
+MIGRAINE_SYMPTOMS = list(SYMPTOM_WEIGHTS.keys())
+
+SEVERITY_MAP = {"⚪️":0, "🟡":1, "🟠":2, "🔴":3, "🟣":4, "none":0, None:0}
+
+def preprocess_symptom_matrix(symptom_df):
+    """
+    Convert emoji severity values into numeric matrix.
+    """
+    num_df = symptom_df[MIGRAINE_SYMPTOMS].replace(SEVERITY_MAP).fillna(0)
+    return num_df
+
+def compute_baseline(num_df):
+    """
+    Compute median and MAD for each symptom to define typical baseline.
+    """
+    median = num_df.median()
+    mad = num_df.mad()  # prevent division by zero
+    mad = mad.replace(0, 1)
+    return median, mad
+
+def score_migraine(num_df, median, mad, weights=SYMPTOM_WEIGHTS):
+    """
+    Compute weighted migraine score per timestamp.
+    Only unusually high severity counts; weights emphasize migraine-specific symptoms.
+    """
+    z_scores = (num_df - median) / mad
+    z_scores = z_scores.clip(lower=0)  # ignore below-baseline symptoms
+
+    # Apply weights
+    weight_series = pd.Series(weights)
+    weighted_scores = z_scores * weight_series
+
+    # Sum across symptoms
+    migraine_score = weighted_scores.sum(axis=1)
+    return migraine_score
+
+def detect_migraine_episodes(migraine_score, threshold=3, min_duration=1):
+    """
+    Identify consecutive timestamps where weighted migraine_score exceeds threshold.
+    Returns list of dicts with start, end, and peak score timestamps.
+    """
+    episodes = []
+    in_episode = False
+    start_idx = None
+
+    for idx, score in migraine_score.items():
+        if score >= threshold:
+            if not in_episode:
+                in_episode = True
+                start_idx = idx
+        else:
+            if in_episode:
+                end_idx = idx
+                # Only keep episodes with at least min_duration timestamps
+                if (migraine_score.loc[start_idx:end_idx].shape[0] >= min_duration):
+                    episodes.append({
+                        "start": start_idx,
+                        "end": end_idx,
+                        "peak_score": migraine_score[start_idx:end_idx].max()
+                    })
+                in_episode = False
+    if in_episode:
+        end_idx = migraine_score.index[-1]
+        if (migraine_score.loc[start_idx:end_idx].shape[0] >= min_duration):
+            episodes.append({
+                "start": start_idx,
+                "end": end_idx,
+                "peak_score": migraine_score[start_idx:].max()
+            })
+    return episodes
+
+def display_migraine_episodes(st, symptom_df, migraine_score, episodes):
+    """
+    Streamlit display for detected migraine episodes.
+    """
+    st.subheader("Migraine Episode Analysis")
+    if not episodes:
+        st.write("No migraine episodes detected.")
+        return
+
+    for i, ep in enumerate(episodes, 1):
+        st.markdown(f"**Episode {i}**")
+        st.write(f"Start: {ep['start']}, End: {ep['end']}, Peak score: {ep['peak_score']:.2f}")
+        st.write("Snapshot of symptoms at peak:")
+        peak_time = migraine_score[ep['start']:ep['end']].idxmax()
+        snapshot = symptom_df.loc[peak_time, MIGRAINE_SYMPTOMS]
+        st.dataframe(snapshot.to_frame("Severity"))
+
 # --- Main Streamlit app ---
 def show_correlation_page(sheets):
     st.title("Correlation Explorer — Health Logs")
@@ -256,3 +372,16 @@ def show_correlation_page(sheets):
             st.write("No borderline correlations found.")
     else:
         st.write("No correlations found.")
+
+    # 3) Migraine detection
+    st.markdown("---")
+    st.subheader("Migraine Detection")
+    
+    # Make sure your daily DataFrame contains symptom columns
+    symptom_df = daily  # or daily[SYMPTOM_COLUMNS] if stored separately
+    num_df = preprocess_symptom_matrix(symptom_df)
+    median, mad = compute_baseline(num_df)
+    migraine_score = score_migraine(num_df, median, mad)
+    episodes = detect_migraine_episodes(migraine_score, threshold=3)
+    display_migraine_episodes(st, symptom_df, migraine_score, episodes)
+    
