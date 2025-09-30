@@ -284,7 +284,7 @@ def score_migraine_refined(num_df, median, mad, weights=None, daily_features=Non
 
     return migraine_score
     
-def detect_migraine_episodes(
+def detect_migraine_episodes_refined(
     migraine_score, 
     num_df, 
     threshold=3.0, 
