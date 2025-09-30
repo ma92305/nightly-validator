@@ -180,34 +180,53 @@ def compute_baseline(num_df):
     mad = mad.replace(0,1)
     return median,mad
 
-def score_migraine_refined(num_df,median,mad,weights=None,daily_features=None,cluster_bonus_scale=0.4):
-    if weights is None: weights = SYMPTOM_WEIGHTS
+def score_migraine_refined(num_df, median, mad, weights=None, daily_features=None, tachy_events_df=None, cluster_bonus_scale=0.4):
+    if weights is None: 
+        weights = SYMPTOM_WEIGHTS
+
     z_scores = (num_df - median)/mad
-    z_scores = z_scores.clip(lower=0,upper=1.0)
+    z_scores = z_scores.clip(lower=0, upper=1.0)
+
     if "Fuzziness" in num_df.columns:
         z_scores["Fuzziness"] = num_df[FUZZINESS_COMPONENTS].sum(axis=1)/len(FUZZINESS_COMPONENTS)
-        z_scores["Fuzziness"] = z_scores["Fuzziness"].clip(0,0.5)
-    cluster_bonus = pd.Series(0,index=num_df.index,dtype=float)
+        z_scores["Fuzziness"] = z_scores["Fuzziness"].clip(0, 0.5)
+
+    # Cluster bonus
+    cluster_bonus = pd.Series(0, index=num_df.index, dtype=float)
     for cluster in MIGRAINE_CLUSTERS:
-        present = (z_scores[cluster]>0).sum(axis=1)/len(cluster)
-        cluster_bonus += present*cluster_bonus_scale
-    weighted_scores = z_scores*pd.Series(weights)
-    migraine_score = weighted_scores.sum(axis=1)+cluster_bonus
-    if daily_features is not None and "HR_avg" in daily_features.columns:
-        daily_features = daily_features.copy()
-        if not pd.api.types.is_datetime64_any_dtype(daily_features.index):
-            daily_features.index = pd.to_datetime(daily_features.index,errors='coerce')
-        tachy_downweight = pd.Series(0,index=num_df.index,dtype=float)
+        present = (z_scores[cluster] > 0).sum(axis=1) / len(cluster)
+        cluster_bonus += present * cluster_bonus_scale
+
+    weighted_scores = z_scores * pd.Series(weights)
+    migraine_score = weighted_scores.sum(axis=1) + cluster_bonus
+
+    # ----- Tachycardia downweight using Tachy Events sheet -----
+    if tachy_events_df is not None:
+        tachy_downweight = pd.Series(0, index=num_df.index, dtype=float)
+
+        # Make sure datetime columns are proper
+        tachy_events_df["event_start"] = pd.to_datetime(tachy_events_df["event_start"], errors="coerce")
+        tachy_events_df["event_end"] = pd.to_datetime(tachy_events_df["event_end"], errors="coerce")
+
         for ts in num_df.index:
-            if pd.isna(ts): continue
-            nearest_idx = daily_features.index.get_indexer([ts],method="nearest")[0]
-            hr = daily_features["HR_avg"].iloc[nearest_idx]
-            pots_count = num_df.loc[ts,POTS_SYMPTOMS[1:]].sum()
-            if hr >= 100 and pots_count >=2: tachy_downweight[ts]=0.7
-        migraine_score = migraine_score*(1-tachy_downweight)
+            if pd.isna(ts):
+                continue
+
+            # Find any tachy event that overlaps this timestamp
+            overlapping = tachy_events_df[(tachy_events_df["event_start"] <= ts) & (tachy_events_df["event_end"] >= ts)]
+            if not overlapping.empty:
+                # Count POTS symptoms for this timestamp
+                pots_count = num_df.loc[ts, POTS_SYMPTOMS[1:]].sum()
+                if pots_count >= 2:
+                    tachy_downweight[ts] = 0.7  # downweight migraine score
+
+        migraine_score = migraine_score * (1 - tachy_downweight)
+
+    # Only keep entries with core symptoms
     core_symptoms = ["Headache","Left side headache","Right side headache","Nausea","Vision issues"]
-    has_core = (num_df[core_symptoms]>0).sum(axis=1)>=2
-    migraine_score = migraine_score.where(has_core,0)
+    has_core = (num_df[core_symptoms] > 0).sum(axis=1) >= 2
+    migraine_score = migraine_score.where(has_core, 0)
+
     return migraine_score
 
 def detect_migraine_episodes_refined(migraine_score,num_df,threshold=3.0,min_duration=1,
