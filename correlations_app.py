@@ -272,8 +272,8 @@ def score_migraine_refined(num_df, median, mad, weights=None, daily_features=Non
         tachy_downweight = pd.Series(0, index=num_df.index)
         for ts in num_df.index:
             # nearest daily timestamp
-            nearest_day = daily_features.index.get_loc(ts, method="nearest")
-            hr = hr_series.iloc[nearest_day]
+            nearest_idx = daily_features.index.get_indexer([ts], method="nearest")[0]
+            hr = hr_series.iloc[nearest_idx]
             if hr >= 100 and (num_df.loc[ts, POTS_SYMPTOMS[1:]].sum() >= 2):
                 tachy_downweight[ts] = 0.7  # downweight migraine score
         migraine_score = migraine_score * (1 - tachy_downweight)
